@@ -4,9 +4,9 @@ Cloudflare-hosted Astro dashboard for the T1000-E tracker. SSR + Static Assets +
 
 ## Prerequisites
 
-- **Node.js 24+** &mdash; check with `node --version`.
-- **Cloudflare account** &mdash; free tier is enough. [Sign up here](https://dash.cloudflare.com/sign-up) if you don't have one. `wrangler` will prompt you to log in on first use.
-- **wrangler** &mdash; installed locally as a dev dependency via `npm install` below, so all commands in this doc use `npx wrangler …`. If you'd rather a global install (`npm i -g wrangler`), drop the `npx` prefix everywhere.
+- **Node.js 24+** — check with `node --version`.
+- **Cloudflare account** — free tier is enough. [Sign up here](https://dash.cloudflare.com/sign-up) if you don't have one. `wrangler` will prompt you to log in on first use.
+- **wrangler** — installed locally as a dev dependency via `npm install` below, so all commands in this doc use `npx wrangler …`. If you'd rather a global install (`npm i -g wrangler`), drop the `npx` prefix everywhere.
 
 ## Quick start (local dev)
 
@@ -17,30 +17,32 @@ npm install
 # TTN_BASIC_AUTH_USER, TTN_BASIC_AUTH_PASS, and EXPECTED_DEV_EUI.
 cp .dev.vars.example .dev.vars
 
+# Create a local D1 (the dev server uses a local SQLite shadow, not the
+# remote DB). Then apply the schema. Both required *before* `npm run dev`
+# — the dev server uses D1 from the first request, including the rate-limit
+# table in /api/auth/verify.
+npx wrangler d1 create tracker     # safe on first run; idempotent if already created
+npx wrangler d1 migrations apply tracker --local
+
 # Generate TOTP_SECRET + COOKIE_SECRET and (when prompted) write them
 # straight into .dev.vars. Scan the printed QR with an authenticator app.
 npm run totp:init
-
-# Create a local D1 (the dev server uses a local SQLite shadow, not the
-# remote DB). Then apply the schema.
-npx wrangler d1 create tracker     # SAFE on first run; idempotent if you've created it before
-npx wrangler d1 migrations apply tracker --local
 
 # Start the dev server at http://localhost:4321
 npm run dev
 ```
 
-You should land on a login screen; enter the current 6-digit code from your authenticator. The dashboard will say "No uplinks recorded yet" until your TTN webhook starts firing &mdash; see *Wiring TTN* below.
+You should land on a login screen; enter the current 6-digit code from your authenticator. The dashboard will say "No uplinks recorded yet" until your TTN webhook starts firing — see *Wiring TTN* below.
 
 ## Scripts
 
 | Script | What it does |
 |---|---|
-| `npm run dev` | `astro dev` &mdash; workerd-backed dev server with full bindings |
-| `npm run build` | `astro build` &mdash; produces `dist/` with static assets + server entry |
+| `npm run dev` | `astro dev` — workerd-backed dev server with full bindings |
+| `npm run build` | `astro build` — produces `dist/` with static assets + server entry |
 | `npm run preview` | Build + `wrangler dev --config dist/server/wrangler.json` |
-| `npm run deploy` | Build + `wrangler deploy` &mdash; ships to your bound Worker |
-| `npm run check` | `astro check && tsc --noEmit` &mdash; typecheck |
+| `npm run deploy` | Build + `wrangler deploy` — ships to your bound Worker |
+| `npm run check` | `astro check && tsc --noEmit` — typecheck |
 | `npm run totp:init` | Generate a new 160-bit TOTP secret + `COOKIE_SECRET`; can write directly into `.dev.vars` |
 
 ## Deploy to your own Cloudflare account
@@ -80,19 +82,19 @@ If `wrangler.jsonc` has a `routes` block pointing at a custom domain you don't o
 
 Once the Worker is reachable, point your TTN application at it:
 
-1. TTN Console &rarr; your application &rarr; **Integrations** &rarr; **Webhooks** &rarr; **Add webhook** &rarr; **Custom webhook**.
+1. TTN Console → your application → **Integrations** → **Webhooks** → **Add webhook** → **Custom webhook**.
 2. Settings:
    - **Webhook format:** JSON
    - **Base URL:** `https://<your-deploy>/api/ingest`
    - **Request authentication:** tick *"Use basic access authentication"*, fill in the same username + password you pushed as `TTN_BASIC_AUTH_USER` / `TTN_BASIC_AUTH_PASS`.
    - **Enabled event types:** tick **Uplink message** only. Leave the path field blank (the base URL is the endpoint).
-3. Save. Within ~2 minutes you should see the first uplink land &mdash; verify in TTN Console &rarr; Live Data (should show 200 status for `as.up.data.forward`), and on the dashboard landing card.
+3. Save. Within ~2 minutes you should see the first uplink land — verify in TTN Console → Live Data (should show 200 status for `as.up.data.forward`), and on the dashboard landing card.
 
 ## Routes
 
 | Path | Auth | Notes |
 |---|---|---|
-| `/` | session cookie | SSR landing &mdash; mini map + latest position + sensor card |
+| `/` | session cookie | SSR landing — mini map + latest position + sensor card |
 | `/map` | session cookie | Leaflet + OSM, polyline by range, auto-refresh checkbox |
 | `/timeline` | session cookie | uPlot charts for every captured field, range dropdown, auto-refresh |
 | `/settings` | session cookie | Forwarder config + audit log |
@@ -105,8 +107,8 @@ Once the Worker is reachable, point your TTN application at it:
 ## Schema
 
 See `migrations/`:
-- `0001_init.sql` &mdash; `uplinks(dev_eui, f_cnt, …)` keyed for idempotency
-- `0002_auth_attempts.sql` &mdash; sliding-window rate-limit for `/api/auth/verify`
-- `0003_settings_and_forward_log.sql` &mdash; generic K/V settings + outbound forward audit log
-- `0004_ttnmapper_headers.sql` &mdash; TTN Mapper email + experiment header keys
-- `0005_spreading_factor.sql` &mdash; capture SF per uplink
+- `0001_init.sql` — `uplinks(dev_eui, f_cnt, …)` keyed for idempotency
+- `0002_auth_attempts.sql` — sliding-window rate-limit for `/api/auth/verify`
+- `0003_settings_and_forward_log.sql` — generic K/V settings + outbound forward audit log
+- `0004_ttnmapper_headers.sql` — TTN Mapper email + experiment header keys
+- `0005_spreading_factor.sql` — capture SF per uplink

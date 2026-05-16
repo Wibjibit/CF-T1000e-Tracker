@@ -40,23 +40,21 @@ export const POST: APIRoute = async ({ request, url }) => {
   const code = (form.get('code') ?? '').toString().trim();
   const returnTo = safeReturnTo((form.get('return_to') ?? '').toString());
 
-  // Best-effort cleanup of old rows. Cheap because of the (ip, ts) index.
-  await env.DB.prepare(`DELETE FROM auth_attempts WHERE ts < ?`).bind(cutoff).run();
+  // Atomic rate limit: insert this attempt first, then count.
+  // Running these as a D1 batch means each concurrent request sees its
+  // own INSERT plus every earlier INSERT in the same window when it does
+  // the count — closes the TOCTOU window where N concurrent verifys
+  // could each read count < limit, pass the gate, and all proceed.
+  const batchResults = await env.DB.batch([
+    env.DB.prepare(`DELETE FROM auth_attempts WHERE ts < ?`).bind(cutoff),
+    env.DB.prepare(`INSERT INTO auth_attempts (ip, ts) VALUES (?, ?)`).bind(ip, now),
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM auth_attempts WHERE ip = ? AND ts > ?`).bind(ip, cutoff),
+  ]);
+  const attempts = (batchResults[2]?.results?.[0] as { n: number } | undefined)?.n ?? 0;
 
-  const countRow = await env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM auth_attempts WHERE ip = ? AND ts > ?`,
-  )
-    .bind(ip, cutoff)
-    .first<{ n: number }>();
-  const attempts = countRow?.n ?? 0;
-
-  if (attempts >= RL_MAX_ATTEMPTS) {
+  if (attempts > RL_MAX_ATTEMPTS) {
     return redirect('/login?error=ratelimit', new Headers());
   }
-
-  // Record this attempt up-front so a flood of parallel requests can't all
-  // squeak through under the limit.
-  await env.DB.prepare(`INSERT INTO auth_attempts (ip, ts) VALUES (?, ?)`).bind(ip, now).run();
 
   const ok = await verifyTOTP(env.TOTP_SECRET, code, now);
   if (!ok) {

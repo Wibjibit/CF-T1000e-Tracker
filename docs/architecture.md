@@ -4,7 +4,7 @@ How the bits fit together.
 
 ## Goals
 
-- Run entirely on Cloudflare's free tier &mdash; no paid plan, no third-party SaaS.
+- Run entirely on Cloudflare's free tier — no paid plan, no third-party SaaS.
 - Single device, single user (or small group), TOTP-gated.
 - Store every uplink (~480/day at the v10 180 s cadence) with full fidelity for at least a year.
 - Map view of current position, timeline view of sensor data, both selectable by time range (1h / 6h / 24h / 7d / 30d / all).
@@ -26,23 +26,23 @@ Bindings (see `webapp/wrangler.jsonc`):
 
 | Path | Method | Auth | Notes |
 |---|---|---|---|
-| `/` | GET | session cookie | SSR landing &mdash; mini map (Leaflet, zoom 16) + GPS / Sensors / Radio detail sections |
+| `/` | GET | session cookie | SSR landing — mini map (Leaflet, zoom 16) + GPS / Sensors / Radio detail sections |
 | `/map` | GET | session cookie | SSR shell; client-side Leaflet + OSM polyline by range; auto-refresh checkbox |
 | `/timeline` | GET | session cookie | SSR shell; client-side uPlot for every captured field (battery, mV, temp, lux, RSSI, SNR, SF, fix quality, sats tracked, sats in view, HDOP, speed, motion); auto-refresh checkbox |
 | `/settings` | GET, POST | session cookie | Forwarder config form (toggle / URL / email / experiment) + audit log of last 50 forward attempts |
 | `/login` | GET | none (public) | TOTP entry form |
 | `/api/ingest` | POST | TTN HTTP Basic auth (public-ish) | Receive TTN webhook, validate, insert into D1, optionally forward to TTN Mapper via `waitUntil` |
-| `/api/points` | GET | session cookie | `?range=1h\|6h\|24h\|7d\|30d\|all&with_fix=1` &mdash; chronological points, capped 5000 |
+| `/api/points` | GET | session cookie | `?range=1h\|6h\|24h\|7d\|30d\|all&with_fix=1` — chronological points, capped 5000 |
 | `/api/auth/verify` | POST | rate-limited (D1) | Validate TOTP code, issue signed session cookie |
 | `/api/auth/logout` | GET, POST | session cookie | Clear cookie |
 
 ### Middleware
 
-`src/middleware.ts` gates everything not in `PUBLIC_EXACT` (`/login`, `/api/ingest`, `/api/auth/*`, `/favicon.ico`) on a valid session cookie. Unauth HTML routes get 302 → `/login?return_to=…`; unauth `/api/*` routes get 401 JSON. The path-match normalises trailing slashes so prerendered `/login/` works the same as `/login` &mdash; learned the hard way when Astro 6's prerender ran middleware at build time with build-time `Astro.url.origin = http://localhost:4321` and embedded that into the deployed static HTML.
+`src/middleware.ts` gates everything not in `PUBLIC_EXACT` (`/login`, `/api/ingest`, `/api/auth/*`, `/favicon.ico`) on a valid session cookie. Unauth HTML routes get 302 → `/login?return_to=…`; unauth `/api/*` routes get 401 JSON. The path-match normalises trailing slashes so prerendered `/login/` works the same as `/login` — learned the hard way when Astro 6's prerender ran middleware at build time with build-time `Astro.url.origin = http://localhost:4321` and embedded that into the deployed static HTML.
 
 ### Auth
 
-- **Dashboard:** TOTP shared-secret gate (RFC 6238, SHA-1, 6 digits, 30 s step, &plusmn;1 step skew). Secret in `TOTP_SECRET` Workers env; `npm run totp:init` generates one and prints an ASCII QR for Authenticator apps. Successful verification mints a 7-day `HMAC-SHA-256`-signed cookie (`COOKIE_SECRET`).
+- **Dashboard:** TOTP shared-secret gate (RFC 6238, SHA-1, 6 digits, 30 s step, ±1 step skew). Secret in `TOTP_SECRET` Workers env; `npm run totp:init` generates one and prints an ASCII QR for Authenticator apps. Successful verification mints a 7-day `HMAC-SHA-256`-signed cookie (`COOKIE_SECRET`).
 - **TTN webhook:** HTTP Basic auth, credentials in `TTN_BASIC_AUTH_USER` / `TTN_BASIC_AUTH_PASS`. Constant-time compare to mitigate timing leaks.
 - **Origin check:** Astro 6's built-in CSRF origin check is on by default; the `/login` form works because browsers send `Origin` automatically. curl/PowerShell tests need `-H "Origin: …"` explicitly.
 
@@ -68,11 +68,11 @@ The raw `ApplicationUp` JSON is retained alongside decoded columns so payload-fo
 The "forward each uplink to TTN Mapper" feature lives in `/api/ingest`. After a successful first insert (skipping replays via `INSERT OR IGNORE`'s `meta.changes`), reads `settings`, and if `ttnmapper_enabled === '1'`, builds a fetch with:
 
 - `Content-Type: application/json`
-- `TTNMAPPERORG-USER: <email>` &mdash; required; TTN Mapper returns 403 "email address is empty" without it
-- `X-TTS-DOMAIN: <body.uplink_message.network_ids.cluster_address>` &mdash; required; TTN Mapper returns 400 "Originating network server header not set" without it. Mirrors what TTN-the-platform sets when it forwards directly.
-- `TTNMAPPERORG-EXPERIMENT: <experiment>` &mdash; optional; tags traffic as test data so it stays off the main coverage map.
+- `TTNMAPPERORG-USER: <email>` — required; TTN Mapper returns 403 "email address is empty" without it
+- `X-TTS-DOMAIN: <body.uplink_message.network_ids.cluster_address>` — required; TTN Mapper returns 400 "Originating network server header not set" without it. Mirrors what TTN-the-platform sets when it forwards directly.
+- `TTNMAPPERORG-EXPERIMENT: <experiment>` — optional; tags traffic as test data so it stays off the main coverage map.
 
-The fetch is detached via `Astro.locals.cfContext.waitUntil(...)`. 25 s `AbortController` timeout. Every attempt (success or timeout) is logged to `forward_log`. **Status:** as of May 2026 the TTN Mapper TTS v3 endpoint reliably times out due to a jammed internal publish channel &mdash; documented upstream issue (the maintainer is openly considering shutting the service down). The forwarder is configurable so it can be pointed at a successor when one exists.
+The fetch is detached via `Astro.locals.cfContext.waitUntil(...)`. 25 s `AbortController` timeout. Every attempt (success or timeout) is logged to `forward_log`. **Status:** as of May 2026 the TTN Mapper TTS v3 endpoint reliably times out due to a jammed internal publish channel — documented upstream issue (the maintainer is openly considering shutting the service down). The forwarder is configurable so it can be pointed at a successor when one exists.
 
 ## Idempotency
 
@@ -81,16 +81,16 @@ TTN's free tier sends each uplink once with no retries. We treat at-most-once de
 ## Deployment target
 
 - **Cloudflare account:** pinned via `account_id` in `webapp/wrangler.jsonc`. Reads as a comment block at the top of the file (FORK SETUP).
-- **Production hostname:** custom-domain Worker binding (e.g. `tracker.example.com`). The zone has to be on the same Cloudflare account as the Worker; Cloudflare auto-provisions the TLS certificate after the first deploy. `workers.dev` URL is auto-disabled when a custom domain is bound &mdash; delete the `routes` block in `wrangler.jsonc` to keep `*.workers.dev` if you don't have a custom domain yet.
+- **Production hostname:** custom-domain Worker binding (e.g. `tracker.example.com`). The zone has to be on the same Cloudflare account as the Worker; Cloudflare auto-provisions the TLS certificate after the first deploy. `workers.dev` URL is auto-disabled when a custom domain is bound — delete the `routes` block in `wrangler.jsonc` to keep `*.workers.dev` if you don't have a custom domain yet.
 - **Dev/preview URL:** `npm run dev` (Astro + workerd via Vite) at `http://localhost:4321/`.
 
 ## Build / deploy
 
-The `@astrojs/cloudflare` v13 adapter generates `dist/server/wrangler.json` on build with the right layout (`assets.directory = ../client`, `main = entry.mjs`). Deploys via `wrangler deploy --config dist/server/wrangler.json`. The repo-tracked `wrangler.jsonc` intentionally omits the `main` field &mdash; the Cloudflare Vite plugin would otherwise error during dev because the file doesn't exist until first build.
+The `@astrojs/cloudflare` v13 adapter generates `dist/server/wrangler.json` on build with the right layout (`assets.directory = ../client`, `main = entry.mjs`). Deploys via `wrangler deploy --config dist/server/wrangler.json`. The repo-tracked `wrangler.jsonc` intentionally omits the `main` field — the Cloudflare Vite plugin would otherwise error during dev because the file doesn't exist until first build.
 
 ## What's deliberately not here
 
-- **Queues / Durable Objects** &mdash; not needed at &le; 720 writes/day; D1 absorbs the writes directly. Outbound forwarding uses `waitUntil` instead of a queue consumer.
-- **Real-time push to the browser** &mdash; the dashboard polls every 5 min when auto-refresh is on; WebSockets / Durable Objects add complexity without proportional value at this cadence.
-- **Multi-device support** &mdash; one device, single `EXPECTED_DEV_EUI` filter. Trivial to generalise later (drop the env filter, add a per-row device label).
-- **Downlink command UI** &mdash; out of scope for now; could be added once the firmware grows downlink handlers.
+- **Queues / Durable Objects** — not needed at ≤ 720 writes/day; D1 absorbs the writes directly. Outbound forwarding uses `waitUntil` instead of a queue consumer.
+- **Real-time push to the browser** — the dashboard polls every 5 min when auto-refresh is on; WebSockets / Durable Objects add complexity without proportional value at this cadence.
+- **Multi-device support** — one device, single `EXPECTED_DEV_EUI` filter. Trivial to generalise later (drop the env filter, add a per-row device label).
+- **Downlink command UI** — out of scope for now; could be added once the firmware grows downlink handlers.

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// Tiny helper for testing: print the current TOTP code for a given base32
-// secret. NOT for production use — just for the smoke tests in Phase 4.
+// Tiny helper for development: print the current TOTP code for a given
+// base32 secret. Useful when scripting login flows from curl / PowerShell
+// without having to glance at your authenticator app each time. Not for
+// production — the secret should live in your authenticator, not in argv.
 //
 // Usage:  node scripts/totp-now.mjs <BASE32_SECRET>
 

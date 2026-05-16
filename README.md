@@ -57,8 +57,11 @@ git clone https://github.com/<you>/CF-T1000e-Tracker.git
 cd CF-T1000e-Tracker/webapp
 
 npm install
-cp .dev.vars.example .dev.vars                    # fills in local TTN basic auth + device DevEUI
-npm run totp:init                                  # generates TOTP_SECRET + COOKIE_SECRET, writes them in
+cp .dev.vars.example .dev.vars                    # template — edit it to set
+                                                  #   TTN_BASIC_AUTH_USER/PASS, EXPECTED_DEV_EUI
+npm run totp:init                                  # generates TOTP_SECRET + COOKIE_SECRET, can write them in
+npx wrangler d1 create tracker                     # one-time, paste the returned database_id into wrangler.jsonc
+npx wrangler d1 migrations apply tracker --local   # build the local D1 schema
 npm run dev                                        # http://localhost:4321
 ```
 
@@ -100,15 +103,17 @@ cp apps/common/lorawan_key_config_private.example.h apps/common/lorawan_key_conf
     -config Release `
     "pca10056\s140\08_ses_lorawan_gnss\t1000_e_dev_kit_pca10056.emProject"
 
-# 4. Wrap into a Seeed-flavoured DFU zip and flash (mag-tap twice for DFU mode first)
+# 4. Wrap into a Seeed-flavoured DFU zip and flash. The device needs to be in
+#    DFU mode first — hold the user button and mag-tap the back of the unit
+#    twice (see firmware/README.md "Get the device into DFU mode" for detail).
 adafruit-nrfutil dfu genpkg `
     --application "pca10056\s140\08_ses_lorawan_gnss\Output\Release\Exe\t1000_e_dev_kit_pca10056.hex" `
-    --application-version 4294967295 --dev-type 82 --sd-req 0x123 `
+    --application-version 4294967295 --dev-type 0x52 --sd-req 0x123 `
     gnss_ttn.zip
 adafruit-nrfutil --verbose dfu serial --package gnss_ttn.zip -p COMx -b 115200 --singlebank
 ```
 
-Why the magic numbers (`--dev-type 82`, `--sd-req 0x123`) matter, full lessons learned, recovery procedures, NTC calibration notes: [`firmware/README.md`](firmware/README.md).
+Why the magic numbers (`--dev-type 0x52`, `--sd-req 0x123`) matter, full lessons learned, recovery procedures, NTC calibration notes: [`firmware/README.md`](firmware/README.md).
 
 ## Repository layout
 

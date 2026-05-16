@@ -24,5 +24,6 @@ COOKIE_SECRET=
 
 # Device identity. Ingest will reject uplinks from any other DevEUI.
 # Find yours in the TTN Console under your registered end device.
-# Format: 16 uppercase hex chars, no separators.
+# Format: 16 hex chars, no separators. The ingest handler normalises to
+# uppercase before comparing, so either case works here.
 EXPECTED_DEV_EUI=REPLACE_WITH_YOUR_16_HEX_DEVEUI

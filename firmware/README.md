@@ -15,8 +15,8 @@ The decoder paired with this payload is in [`../decoder/ttn_decoder.js`](../deco
 
 ### 1. Tooling
 
-- **SEGGER Embedded Studio for ARM 5.68+** &mdash; <https://www.segger.com/downloads/embedded-studio/>. Free for Nordic targets. On first launch it offers a Nordic-issued license; accept it.
-- **Nordic nRF5 SDK 17.1.0** &mdash; <https://www.nordicsemi.com/Products/Development-software/nrf5-sdk>. Requires a free Nordic Semi account. The download is a zip named like `nRF5_SDK_17.1.0_ddde560.zip`; unpack it anywhere &mdash; the directory you'll point at in step 2 is the one that contains `components/`, `modules/`, `integration/` etc.
+- **SEGGER Embedded Studio for ARM 5.68+** — <https://www.segger.com/downloads/embedded-studio/>. Free for Nordic targets. On first launch it offers a Nordic-issued license; accept it.
+- **Nordic nRF5 SDK 17.1.0** — <https://www.nordicsemi.com/Products/Development-software/nrf5-sdk>. Requires a free Nordic Semi account. The download is a zip named like `nRF5_SDK_17.1.0_ddde560.zip`; unpack it anywhere — the directory you'll point at in step 2 is the one that contains `components/`, `modules/`, `integration/` etc.
 - **Python 3.10+** with `pip install adafruit-nrfutil`. The flashing tool.
 - A **TTN account** + a registered end device. The Things Stack Community Edition is free; sign up at <https://www.thethingsnetwork.org/> and register a device in the EU868 region (or whichever region applies). You'll need the DevEUI, JoinEUI, and AppKey in step 3.
 
@@ -54,7 +54,7 @@ The build emits ~50 implicit-declaration warnings from Seeed's HAL code. These a
 
 ### Get the device into DFU mode
 
-Hold the user button on the T1000-E and **mag-tap twice** &mdash; quickly drag a magnet (or any decent-sized metal object) across the mag-pogo-pin area on the back, twice in roughly half a second. The status LED goes solid green and the device enumerates over USB with VID:PID `2886:0057` (Seeed bootloader). This trick is firmware-mediated rather than hardware-only, so it works as long as the currently-running app doesn't consume USB events &mdash; ours doesn't.
+Hold the user button on the T1000-E and **mag-tap twice** — quickly drag a magnet (or any decent-sized metal object) across the mag-pogo-pin area on the back, twice in roughly half a second. The status LED goes solid green and the device enumerates over USB with VID:PID `2886:0057` (Seeed bootloader). This trick is firmware-mediated rather than hardware-only, so it works as long as the currently-running app doesn't consume USB events — ours doesn't.
 
 If you've never done it before and it feels finicky, give it a couple of attempts. You have ~30 s in DFU mode before the bootloader gives up and reboots back into the app.
 
@@ -78,31 +78,31 @@ adafruit-nrfutil --verbose dfu serial `
     -p $com -b 115200 --singlebank
 ```
 
-On macOS / Linux the COM-port auto-detect needs adjusting &mdash; the device typically appears as `/dev/tty.usbmodem*` (macOS) or `/dev/ttyACM*` (Linux). Use `ls /dev/tty*` after entering DFU mode to find it.
+On macOS / Linux the COM-port auto-detect needs adjusting — the device typically appears as `/dev/tty.usbmodem*` (macOS) or `/dev/ttyACM*` (Linux). Use `ls /dev/tty*` after entering DFU mode to find it.
 
 ### Why the magic numbers
 
 | Flag | Value | Why |
 |---|---|---|
-| `--dev-type` | `0x52` (= 82 dec) | Seeed's bootloader requires this exact `device_type`. Anything else &rarr; USB STALL mid-flash. |
+| `--dev-type` | `0x52` (= 82 dec) | Seeed's bootloader requires this exact `device_type`. Anything else → USB STALL mid-flash. |
 | `--sd-req`   | `0x123` (= 291 dec) | Seeed's custom SoftDevice ID (not the standard Nordic S140 `0xCA`). Discovered by diffing against the official MeshCore manifest. |
 | `--application-version` | `0xFFFFFFFF` | Stops the bootloader rejecting the package as "older than what's installed". |
-| `--singlebank` | &mdash; | Seeed's bootloader is single-bank; without this `adafruit-nrfutil` uses dual-bank semantics and fails. |
+| `--singlebank` | — | Seeed's bootloader is single-bank; without this `adafruit-nrfutil` uses dual-bank semantics and fails. |
 
 ### Verifying success
 
 After `Device programmed.`:
 
 1. **USB port comes back.** Within ~5 s the device re-enumerates, this time as VID `1915:520F` (Nordic CDC) on a fresh COM port. If no port appears at all, the app didn't start.
-2. **TTN join.** Open TTN Console &rarr; your application &rarr; *Live Data*. Within ~30 s you should see `gs:up.join.receive` &rarr; `js.join.accept` &rarr; `as.up.data.forward` with `f_cnt: 1`. If you only see join requests with no accept, your DevEUI / JoinEUI / AppKey don't match what TTN has registered.
+2. **TTN join.** Open TTN Console → your application → *Live Data*. Within ~30 s you should see `gs:up.join.receive` → `js.join.accept` → `as.up.data.forward` with `f_cnt: 1`. If you only see join requests with no accept, your DevEUI / JoinEUI / AppKey don't match what TTN has registered.
 3. **First uplink content.** Decode using `decoder/ttn_decoder.js`. The decoder emits diagnostic warnings that map to states:
-   - *"UART RX dead"* &rarr; hardware issue (UART pins or GPS chip power).
-   - *"UART receiving but no NMEA lines parsed"* &rarr; likely chip not configured / wrong baud.
-   - *"NMEA flowing but chip reports no sats"* &rarr; indoors / no sky view, or constellations disabled &mdash; verify by running outside.
-   - *"Chip sees N sats, waiting for fix"* &rarr; working, just give it time.
-   - Real lat/lon in `decoded_payload` &rarr; you're done.
+   - *"UART RX dead"* → hardware issue (UART pins or GPS chip power).
+   - *"UART receiving but no NMEA lines parsed"* → likely chip not configured / wrong baud.
+   - *"NMEA flowing but chip reports no sats"* → indoors / no sky view, or constellations disabled — verify by running outside.
+   - *"Chip sees N sats, waiting for fix"* → working, just give it time.
+   - Real lat/lon in `decoded_payload` → you're done.
 
-   Indoors you should still see `uart_bytes_rx` and `uart_lines_parsed` non-zero &mdash; that proves the firmware-side chain is alive even with the satellites unreachable.
+   Indoors you should still see `uart_bytes_rx` and `uart_lines_parsed` non-zero — that proves the firmware-side chain is alive even with the satellites unreachable.
 
 ## Layout
 
@@ -126,11 +126,11 @@ firmware/
 1. **DFU mode broken on the running app:** mag-tap-twice should always work as long as our LoRaWAN firmware is the running app (it doesn't consume USB events). If you ever add USB CDC, it may stop working.
 2. **App misbehaves but bootloader works:** mag-tap → flash a previous known-good `.zip`.
 3. **No path into DFU mode at all:** either drain the battery completely (several days unplugged, then cold plug + immediate mag-tap before app starts), or re-flash MeshCore via the [MeshCore Configurator](https://meshcore.co.uk/configurator/) BLE flow first to get a clean slate.
-4. **Bootloader itself broken:** SWD probe via the unexposed pads is the last resort. The original Seeed bootloader UF2 is `firmware/firmware/t1000_e_bootloader_1th_ota_uf2.uf2` but reflashing this is dangerous — only attempt if everything else fails.
+4. **Bootloader itself broken:** SWD probe via the unexposed pads is the last resort. Seeed's original bootloader UF2 lives at `firmware/firmware/t1000_e_bootloader_1th_ota_uf2.uf2` — it is the **only** file in `firmware/firmware/` you might ever want to deliberately use, and only in this exact case. Flashing it is dangerous and replaces the bootloader; if you get it wrong you brick the device.
 
 ## Files in `firmware/firmware/` are NOT for flashing
 
-Seeed ships prebuilt example `.uf2` files at `firmware/firmware/`. **All of them are built for US915** (and target other applications). Flashing them on a EU868 device is wrong on three levels: wrong region, possibly wrong app, and the bootloader UF2 in the same directory will replace the bootloader rather than the app.
+Seeed ships prebuilt example `.uf2` files at `firmware/firmware/`. **All of them are built for US915** (and target other applications). Flashing any of those examples on a EU868 device is wrong on three levels: wrong region, possibly wrong app, and the bootloader UF2 in the same directory replaces the bootloader rather than the app (see "Recovery if a flash goes bad" #4 above for when the bootloader UF2 is the right answer; never otherwise).
 
 ## Firmware-level lessons learned
 
