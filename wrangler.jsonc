@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cf-t1000e-tracker",
+  "compatibility_date": "2026-05-16",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Note: 'main' is intentionally omitted. The @astrojs/cloudflare adapter
+  // generates dist/_worker.js/index.js during 'astro build' and writes its
+  // own wrangler config alongside it. Wrangler picks that up at deploy time.
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+
+  // D1 binding (added in Phase 2):
+  // "d1_databases": [
+  //   { "binding": "DB", "database_name": "tracker", "database_id": "<created-via-wrangler-d1-create>" }
+  // ]
+}

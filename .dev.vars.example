@@ -1,0 +1,21 @@
+# Copy this file to .dev.vars and fill in real values for local development.
+# In production, set these via:
+#   wrangler secret put TTN_BASIC_AUTH_USER
+#   wrangler secret put TTN_BASIC_AUTH_PASS
+#   wrangler secret put TOTP_SECRET
+#   wrangler secret put COOKIE_SECRET
+# Or paste them into the Cloudflare dashboard under Workers -> Settings -> Variables.
+
+# TTN webhook Basic auth (configure the matching values in the TTN webhook integration).
+TTN_BASIC_AUTH_USER=ttn
+TTN_BASIC_AUTH_PASS=replace-with-a-long-random-string
+
+# TOTP shared secret (base32). Phase 4 ships a 'npm run totp:init' helper that
+# generates one and prints a QR for Google Authenticator / Authy / 1Password.
+TOTP_SECRET=
+
+# 32+ byte random hex string used to sign session cookies.
+COOKIE_SECRET=
+
+# Device identity. Filter ingest to one DevEUI (uppercase, no separators).
+EXPECTED_DEV_EUI=REPLACE_WITH_YOUR_16_HEX_DEVEUI

@@ -1,0 +1,23 @@
+---
+// SSR landing page. Phase 1: placeholder. Phase 3 will pull latest position from D1.
+const renderedAt = new Date().toISOString();
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>T1000-E Tracker</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 4rem auto; padding: 0 1rem; line-height: 1.5; }
+      code { background: color-mix(in srgb, currentColor 10%, transparent); padding: 0.1em 0.3em; border-radius: 0.2em; font-size: 0.9em; }
+      .meta { color: color-mix(in srgb, currentColor 60%, transparent); font-size: 0.85em; }
+    </style>
+  </head>
+  <body>
+    <h1>SenseCAP T1000-E LoRaWAN Tracker</h1>
+    <p>Phase 1 scaffold &mdash; Astro + Cloudflare Workers + Static Assets.</p>
+    <p>Next: D1 schema and the TTN ingest endpoint at <code>/api/ingest</code>.</p>
+    <p class="meta">SSR rendered at {renderedAt}</p>
+  </body>
+</html>
