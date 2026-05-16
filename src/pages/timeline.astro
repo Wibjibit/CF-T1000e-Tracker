@@ -1,0 +1,262 @@
+---
+// Served through the Worker (not prerendered) so the auth middleware gates it.
+// All data comes from /api/points client-side.
+export const prerender = false;
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>T1000-E Tracker &mdash; timeline</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/uplot@1.6.32/dist/uPlot.min.css"
+      crossorigin="anonymous"
+    />
+    <style>
+      :root { color-scheme: light dark; }
+      html, body { margin: 0; padding: 0; font-family: system-ui, sans-serif; }
+      body { display: flex; flex-direction: column; min-height: 100vh; }
+      header {
+        padding: 0.6rem 1rem; display: flex; align-items: center; gap: 1rem;
+        border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+        flex-wrap: wrap; position: sticky; top: 0; background: Canvas; z-index: 10;
+      }
+      header h1 { margin: 0; font-size: 1.05rem; }
+      header a { color: inherit; text-decoration: none; opacity: 0.7; }
+      header a:hover { opacity: 1; }
+      .ranges { display: flex; gap: 0.3rem; margin-left: auto; }
+      .ranges button {
+        padding: 0.3em 0.7em; border-radius: 0.3em;
+        border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+        background: transparent; color: inherit; cursor: pointer; font: inherit;
+      }
+      .ranges button[aria-pressed="true"] {
+        background: color-mix(in srgb, currentColor 15%, transparent);
+        border-color: color-mix(in srgb, currentColor 35%, transparent);
+      }
+      #status { font-size: 0.85rem; opacity: 0.7; }
+
+      main { padding: 1rem; display: flex; flex-direction: column; gap: 1.25rem; max-width: 64rem; margin: 0 auto; width: 100%; box-sizing: border-box; }
+      .chart-card {
+        border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+        border-radius: 0.5rem; padding: 0.7rem 0.9rem 0.9rem;
+      }
+      .chart-card h2 {
+        font-size: 0.85rem; font-weight: 500; margin: 0 0 0.5rem;
+        color: color-mix(in srgb, currentColor 70%, transparent);
+        display: flex; justify-content: space-between; align-items: baseline;
+      }
+      .chart-card .latest { font-variant-numeric: tabular-nums; font-weight: 600; color: inherit; }
+      .chart-card .chart { height: 130px; }
+      .motion-card .chart { height: 60px; }
+      .empty { padding: 2rem; text-align: center; opacity: 0.6; font-size: 0.95rem; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>T1000-E Tracker</h1>
+      <a href="/">&larr; home</a>
+      <a href="/map">map</a>
+      <span id="status">loading&hellip;</span>
+      <div class="ranges" role="group" aria-label="Time range">
+        <button data-range="24h" aria-pressed="true">24h</button>
+        <button data-range="7d">7d</button>
+        <button data-range="30d">30d</button>
+        <button data-range="all">all</button>
+      </div>
+    </header>
+    <main id="main">
+      <div class="chart-card"><h2>Battery <span class="latest" data-latest="battery_pct">&mdash;</span></h2><div class="chart" id="chart-battery"></div></div>
+      <div class="chart-card"><h2>Battery (mV) <span class="latest" data-latest="battery_mv">&mdash;</span></h2><div class="chart" id="chart-battery-mv"></div></div>
+      <div class="chart-card"><h2>Temperature (PCB) <span class="latest" data-latest="temp_c">&mdash;</span></h2><div class="chart" id="chart-temp"></div></div>
+      <div class="chart-card"><h2>Light <span class="latest" data-latest="lux_pct">&mdash;</span></h2><div class="chart" id="chart-lux"></div></div>
+      <div class="chart-card"><h2>RSSI <span class="latest" data-latest="rssi">&mdash;</span></h2><div class="chart" id="chart-rssi"></div></div>
+      <div class="chart-card"><h2>SNR <span class="latest" data-latest="snr">&mdash;</span></h2><div class="chart" id="chart-snr"></div></div>
+      <div class="chart-card motion-card"><h2>Motion <span class="latest" data-latest="motion_count">&mdash;</span></h2><div class="chart" id="chart-motion"></div></div>
+    </main>
+
+    <script
+      src="https://unpkg.com/uplot@1.6.32/dist/uPlot.iife.min.js"
+      crossorigin="anonymous"
+      is:inline
+    ></script>
+    <script is:inline>
+      (() => {
+        const uPlot = window.uPlot;
+        const statusEl = document.getElementById('status');
+        const setStatus = (m) => { if (statusEl) statusEl.textContent = m; };
+
+        // One uPlot per chart. Stored so we can destroy + recreate on range change.
+        const charts = {};
+
+        function destroyAll() {
+          for (const k of Object.keys(charts)) {
+            try { charts[k].destroy(); } catch (e) { /* noop */ }
+            delete charts[k];
+          }
+        }
+
+        // Pick a reasonable y-range so flat data doesn't render as a zero-line.
+        function autoRange(values, opts) {
+          const o = opts || {};
+          const finite = values.filter((v) => v != null && Number.isFinite(v));
+          if (finite.length === 0) return [0, 1];
+          let lo = Math.min.apply(null, finite);
+          let hi = Math.max.apply(null, finite);
+          if (lo === hi) { lo -= 1; hi += 1; }
+          const pad = (hi - lo) * 0.1;
+          lo -= pad; hi += pad;
+          if (o.min != null && lo < o.min) lo = o.min;
+          if (o.max != null && hi > o.max) hi = o.max;
+          return [lo, hi];
+        }
+
+        function makeChart(containerId, xs, ys, opts) {
+          const el = document.getElementById(containerId);
+          if (!el) return null;
+          el.innerHTML = '';
+          const width = el.clientWidth || 600;
+          const height = el.clientHeight || 130;
+          const series = [
+            {},
+            Object.assign({
+              label: opts.label,
+              stroke: opts.color || '#1d68d0',
+              width: 1.5,
+              points: { show: xs.length < 200 },
+              value: (_, v) => v == null ? '—' : (opts.fmt ? opts.fmt(v) : v.toFixed(2)),
+              spanGaps: false,
+            }, opts.series || {}),
+          ];
+          const range = autoRange(ys, opts);
+          const config = {
+            width, height, series,
+            scales: { y: { range: () => range } },
+            axes: [
+              { stroke: 'currentColor', grid: { stroke: 'rgba(127,127,127,0.15)' } },
+              { stroke: 'currentColor', grid: { stroke: 'rgba(127,127,127,0.15)' }, size: 50 },
+            ],
+            legend: { show: false },
+            cursor: { y: false },
+          };
+          return new uPlot(config, [xs, ys], el);
+        }
+
+        function makeMotionChart(xs, motionVals) {
+          const el = document.getElementById('chart-motion');
+          if (!el) return null;
+          el.innerHTML = '';
+          const width = el.clientWidth || 600;
+          const height = el.clientHeight || 60;
+          return new uPlot({
+            width, height,
+            series: [
+              {},
+              {
+                label: 'motion',
+                stroke: 'orange',
+                fill: 'rgba(255,165,0,0.45)',
+                paths: uPlot.paths.bars && uPlot.paths.bars({ size: [0.6] }),
+                value: (_, v) => v === 1 ? 'yes' : 'no',
+              },
+            ],
+            scales: { y: { range: () => [0, 1.1] } },
+            axes: [
+              { stroke: 'currentColor', grid: { stroke: 'rgba(127,127,127,0.15)' } },
+              { stroke: 'currentColor', grid: { stroke: 'rgba(127,127,127,0.15)' }, size: 50, values: (_, splits) => splits.map((v) => v === 0 ? '' : v === 1 ? '✓' : '') },
+            ],
+            legend: { show: false },
+            cursor: { y: false },
+          }, [xs, motionVals], el);
+        }
+
+        function setLatest(key, text) {
+          const el = document.querySelector(`[data-latest="${key}"]`);
+          if (el) el.textContent = text;
+        }
+
+        async function load(range) {
+          setStatus('loading ' + range + '…');
+          destroyAll();
+          let body;
+          try {
+            const res = await fetch('/api/points?range=' + encodeURIComponent(range), { credentials: 'same-origin' });
+            if (!res.ok) { setStatus('error: HTTP ' + res.status); return; }
+            body = await res.json();
+          } catch (e) {
+            setStatus('error: ' + e.message);
+            return;
+          }
+          const points = body.points || [];
+          if (points.length === 0) {
+            setStatus('no data in ' + range);
+            return;
+          }
+
+          // uPlot wants seconds, our ts is ms.
+          const xs = points.map((p) => p.ts / 1000);
+
+          const batteryPct = points.map((p) => p.battery_pct);
+          const batteryMv  = points.map((p) => p.battery_mv);
+          const tempC      = points.map((p) => p.temp_c);
+          const luxPct     = points.map((p) => p.lux_pct);
+          const rssi       = points.map((p) => p.rssi);
+          const snr        = points.map((p) => p.snr);
+          const motion     = points.map((p) => p.motion ? 1 : 0);
+
+          charts.battery   = makeChart('chart-battery',    xs, batteryPct, { label: 'battery %', color: '#3aaa3a', min: 0,    max: 100, fmt: (v) => v.toFixed(0) + '%' });
+          charts.batteryMv = makeChart('chart-battery-mv', xs, batteryMv,  { label: 'mV',        color: '#2a8d2a', fmt: (v) => v.toFixed(0) + ' mV' });
+          charts.temp      = makeChart('chart-temp',       xs, tempC,      { label: '°C',        color: '#c33',    fmt: (v) => v.toFixed(2) + ' °C' });
+          charts.lux       = makeChart('chart-lux',        xs, luxPct,     { label: 'light %',   color: '#d4a017', min: 0, max: 100, fmt: (v) => v.toFixed(0) + '%' });
+          charts.rssi      = makeChart('chart-rssi',       xs, rssi,       { label: 'dBm',       color: '#1d68d0', fmt: (v) => v.toFixed(0) + ' dBm' });
+          charts.snr       = makeChart('chart-snr',        xs, snr,        { label: 'dB',        color: '#8a44d3', fmt: (v) => v.toFixed(1) + ' dB' });
+          charts.motion    = makeMotionChart(xs, motion);
+
+          // Latest values in the card headers.
+          const last = points[points.length - 1];
+          const fmt = (v, suffix) => v == null ? '—' : (typeof v === 'number' ? v : Number(v)) + suffix;
+          setLatest('battery_pct', fmt(last.battery_pct, '%'));
+          setLatest('battery_mv',  fmt(last.battery_mv,  ' mV'));
+          setLatest('temp_c',      last.temp_c == null ? '—' : last.temp_c.toFixed(2) + ' °C');
+          setLatest('lux_pct',     fmt(last.lux_pct, '%'));
+          setLatest('rssi',        fmt(last.rssi,   ' dBm'));
+          setLatest('snr',         last.snr == null ? '—' : last.snr.toFixed(1) + ' dB');
+          const motionCount = motion.reduce((a, b) => a + b, 0);
+          setLatest('motion_count', motionCount + ' of ' + points.length);
+
+          setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + range + ')' + (body.truncated ? ' — truncated' : ''));
+        }
+
+        // Resize: rebuild on window resize. Simple but correct; uPlot doesn't auto-resize.
+        let resizeTimer = null;
+        window.addEventListener('resize', () => {
+          if (resizeTimer) clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(() => {
+            const active = document.querySelector('.ranges button[aria-pressed="true"]');
+            load(active ? active.getAttribute('data-range') : '24h');
+          }, 200);
+        });
+
+        document.querySelectorAll('.ranges button[data-range]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            document.querySelectorAll('.ranges button[data-range]').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+            btn.setAttribute('aria-pressed', 'true');
+            const range = btn.getAttribute('data-range') || '24h';
+            location.hash = range;
+            load(range);
+          });
+        });
+
+        const initial = (location.hash || '#24h').replace(/^#/, '');
+        const valid = ['24h', '7d', '30d', 'all'].includes(initial) ? initial : '24h';
+        if (valid !== '24h') {
+          document.querySelectorAll('.ranges button[data-range]').forEach((b) => {
+            b.setAttribute('aria-pressed', b.getAttribute('data-range') === valid ? 'true' : 'false');
+          });
+        }
+        load(valid);
+      })();
+    </script>
+  </body>
+</html>
