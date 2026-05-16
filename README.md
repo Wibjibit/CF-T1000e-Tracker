@@ -24,7 +24,10 @@ Designed to run end-to-end on Cloudflare's **free tier** — no paid plan, no th
 
 - **Live map** with a 1h / 6h / 24h / 7d / 30d / all-time selector; current position marker + track polyline; optional auto-refresh every 5 minutes.
 - **Sensor timeline** — battery %, battery mV, PCB temperature, ambient light, RSSI, SNR, spreading factor, GPS fix quality, sats tracked, sats in view, HDOP, speed, motion events.
+- **Coverage "beams"** view — every uplink's receiving gateways drawn as colour-coded lines (RSSI or SNR) from gateway to fix location, à la TTN Mapper but on your own data.
+- **Gateway management** table — every gateway ever heard, with TTN-fetched name/location, per-gateway uplink counts and RSSI/SNR stats, manual lat/lon override for unregistered hobby gateways, and a hide flag for bogus ones.
 - **Landing dashboard** with a zoomed-in mini map and grouped GPS / Sensors / Radio detail cards.
+- **Persistent sidebar nav** with section grouping, a desktop collapse toggle (icon rail), and a CSS-only mobile drawer.
 - **TOTP login** (works with Google Authenticator, Authy, 1Password, anything RFC 6238).
 - **Configurable downstream forwarder** that fans out each uplink to e.g. TTN Mapper *after* responding 200 to TTN, so TTN's webhook timeout never trips. Audit log of every forward attempt visible in `/settings`.
 - **Honest hardware-side firmware** — fixes Seeed's stock example so the AG3335 GPS chip actually gets a fix in EU868, exposes battery / temperature / light / motion in a 26-byte payload, and pins SF12 for maximum range.
@@ -120,7 +123,7 @@ Why the magic numbers (`--dev-type 0x52`, `--sd-req 0x123`) matter, full lessons
 | Path | What's in it |
 |---|---|
 | [`firmware/`](firmware/) | Fork of [Seeed's open-source T1000-E firmware](https://github.com/Seeed-Studio/Seeed-Tracker-T1000-E-for-LoRaWAN-dev-board). EU868 region, AG3335 GNSS init fixes, 26-byte payload (battery / temp / lux / motion + GPS), SF12-pinned v10 ADR. Credentials live in a gitignored `lorawan_key_config_private.h`. |
-| [`webapp/`](webapp/) | Astro 6 + `@astrojs/cloudflare` v13. Workers + Static Assets + D1. Ingest, map, timeline, settings, TOTP login. Deployed via `npm run deploy`. |
+| [`webapp/`](webapp/) | Astro 6 + `@astrojs/cloudflare` v13. Workers + Static Assets + D1. Pages: home, map, timeline, beams, gateways, settings, TOTP login — all sharing `src/layouts/Layout.astro` (persistent left sidebar, collapse-to-rail, mobile drawer). Deployed via `npm run deploy`. |
 | [`decoder/ttn_decoder.js`](decoder/ttn_decoder.js) | TTN Console uplink formatter (paste-in JS). Mirrored as a typed module at `webapp/src/lib/decoder.ts`. |
 | [`docs/payload.md`](docs/payload.md) | Byte-level v9 payload spec — single source of truth shared by firmware and dashboard. |
 | [`docs/architecture.md`](docs/architecture.md) | Route table, bindings, D1 schema, auth model, forwarder behaviour. |
@@ -143,13 +146,16 @@ See [`docs/architecture.md`](docs/architecture.md) for the full picture.
 - Read API + map page (Leaflet + OSM, polyline by selectable range)
 - TOTP auth (signed session cookie, D1-backed rate limit)
 - Sensor timeline with charts for every captured field (uPlot)
+- `/beams` coverage view (Leaflet polylines per receiving gateway, coloured by RSSI or SNR)
+- `/gateways` management page (TTN-fetched metadata cache, aggregates, manual lat/lon override, hide-from-beams, sanity badges)
+- Shared `Layout.astro` with persistent left sidebar, desktop collapse-to-rail toggle, and CSS-only mobile hamburger drawer
 - Production deploy on a custom domain (Cloudflare auto-TLS)
 - Configurable downstream forwarder with audit log (currently TTN Mapper, runs via `waitUntil` so their slowness can't time us out from TTN's side)
 - Firmware in the repo with credentials split out into a gitignored sibling header
 
 ## Future work
 
-- **`/coverage` page** — heatmap + reception "beams" overlaid on OSM. Data is already in D1: every uplink has `lat`, `lon`, `rssi`, `snr`, `gateway_id`. Needs a gateway-coordinates lookup.
+- **Coverage heatmap** — density of where the device has been heard at all, complementing the per-uplink beams view that `/beams` already provides.
 - **NTC temperature calibration** — firmware reads ~10 °C cold; see [`firmware/README.md`](firmware/README.md) for the back-solve approach.
 - **Motion-triggered uplinks** — Seeed's `11_lorawan_tracker` reference. Better battery life by sleeping while still.
 - **Self-host a TTN Mapper successor** — the forwarder is already generic (target URL + headers in D1); pointing at a replacement is a `/settings` edit.

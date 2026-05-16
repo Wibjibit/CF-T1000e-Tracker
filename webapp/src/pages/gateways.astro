@@ -6,6 +6,7 @@ import { env } from 'cloudflare:workers';
 import { listGateways, type GatewayListEntry } from '../lib/gateways';
 import { readTtnApiConfig } from '../lib/settings';
 import { formatAgo } from '../lib/format';
+import Layout from '../layouts/Layout.astro';
 
 export const prerender = false;
 
@@ -49,20 +50,13 @@ const BADGE_LABELS: Record<string, { text: string; cls: string }> = {
   never_refreshed:{ text: 'never refreshed', cls: 'warn' },
 };
 ---
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Gateways &mdash; T1000-E Tracker</title>
-    <style>
-      :root { color-scheme: light dark; }
-      html, body { margin: 0; padding: 0; font-family: system-ui, sans-serif; line-height: 1.4; }
-      body { max-width: 80rem; margin: 0 auto; padding: 1rem; }
-      header { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
-      header h1 { margin: 0; font-size: 1.4rem; }
-      header a { color: inherit; opacity: 0.65; text-decoration: none; font-size: 0.92rem; }
-      header a:hover { opacity: 1; }
-      .spacer { flex: 1; }
+<Layout title="Gateways">
+  <section class="page">
+    <h1 class="page-title">Gateways</h1>
+
+<style>
+      .page { max-width: 80rem; margin: 0 auto; padding: 1rem; width: 100%; }
+      .page-title { margin: 0 0 1rem; font-size: 1.4rem; }
 
       .toolbar {
         display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;
@@ -157,18 +151,6 @@ const BADGE_LABELS: Record<string, { text: string; cls: string }> = {
       }
       .empty { padding: 2rem; text-align: center; opacity: 0.55; }
     </style>
-  </head>
-  <body>
-    <header>
-      <h1>Gateways</h1>
-      <a href="/">&larr; home</a>
-      <a href="/map">map</a>
-      <a href="/timeline">timeline</a>
-      <a href="/beams">beams</a>
-      <a href="/settings">settings</a>
-      <span class="spacer"></span>
-      <a href="/api/auth/logout">sign out</a>
-    </header>
 
     {!hasApiKey && (
       <div class="api-warning">
@@ -478,5 +460,5 @@ const BADGE_LABELS: Record<string, { text: string; cls: string }> = {
         }
       })();
     </script>
-  </body>
-</html>
+  </section>
+</Layout>

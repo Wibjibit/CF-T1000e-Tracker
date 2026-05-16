@@ -1,329 +1,296 @@
 ---
 // Served through the Worker (not prerendered) so the auth middleware gates it.
 // All data comes from /api/points client-side.
+import Layout from '../layouts/Layout.astro';
 export const prerender = false;
 ---
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>T1000-E Tracker &mdash; timeline</title>
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/uplot@1.6.32/dist/uPlot.min.css"
-      crossorigin="anonymous"
-    />
-    <style>
-      :root { color-scheme: light dark; }
-      html, body { margin: 0; padding: 0; font-family: system-ui, sans-serif; }
-      body { display: flex; flex-direction: column; min-height: 100vh; }
-      header {
-        padding: 0.6rem 1rem; display: flex; align-items: center; gap: 1rem;
-        border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-        flex-wrap: wrap; position: sticky; top: 0; background: Canvas; z-index: 10;
-      }
-      header h1 { margin: 0; font-size: 1.05rem; }
-      header a { color: inherit; text-decoration: none; opacity: 0.7; }
-      header a:hover { opacity: 1; }
-      .auto-refresh { display: flex; align-items: center; gap: 0.35em; font-size: 0.85rem; opacity: 0.85; cursor: pointer; }
-      .auto-refresh input { cursor: pointer; }
-      .ranges { margin-left: auto; }
-      .ranges select {
-        font: inherit; padding: 0.35em 0.6em; padding-right: 1.8em; border-radius: 0.3em;
-        border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
-        background: transparent; color: inherit; cursor: pointer;
-        appearance: none; -webkit-appearance: none;
-        background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
-        background-position: calc(100% - 14px) 50%, calc(100% - 8px) 50%;
-        background-size: 6px 6px, 6px 6px;
-        background-repeat: no-repeat;
-      }
-      .ranges select:focus { outline: 2px solid color-mix(in srgb, currentColor 35%, transparent); outline-offset: 1px; }
-      .ranges select option { color: black; background: white; }
-      #status { font-size: 0.85rem; opacity: 0.7; }
+<Layout title="T1000-E Tracker — timeline">
+  <link
+    slot="head"
+    rel="stylesheet"
+    href="https://unpkg.com/uplot@1.6.32/dist/uPlot.min.css"
+    crossorigin="anonymous"
+  />
 
-      main { padding: 1rem; display: flex; flex-direction: column; gap: 1.25rem; max-width: 64rem; margin: 0 auto; width: 100%; box-sizing: border-box; }
-      .chart-card {
-        border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-        border-radius: 0.5rem; padding: 0.7rem 0.9rem 0.9rem;
-      }
-      .chart-card h2 {
-        font-size: 0.85rem; font-weight: 500; margin: 0 0 0.5rem;
-        color: color-mix(in srgb, currentColor 70%, transparent);
-        display: flex; justify-content: space-between; align-items: baseline;
-      }
-      .chart-card .latest { font-variant-numeric: tabular-nums; font-weight: 600; color: inherit; }
-      .chart-card .chart { height: 160px; }
-      .motion-card .chart { height: 70px; }
-      .empty { padding: 2rem; text-align: center; opacity: 0.6; font-size: 0.95rem; }
-    </style>
-  </head>
-  <body>
-    <header>
-      <h1>T1000-E Tracker</h1>
-      <a href="/">&larr; home</a>
-      <a href="/map">map</a>
-      <a href="/beams">beams</a>
-      <a href="/gateways">gateways</a>
-      <a href="/settings">settings</a>
-      <span id="status">loading&hellip;</span>
-      <label class="auto-refresh" title="Re-fetch every 5 minutes">
-        <input type="checkbox" id="auto-refresh" />
-        Auto-refresh
-      </label>
-      <div class="ranges">
-        <select id="range-select" aria-label="Time range">
-          <option value="1h">Last hour</option>
-          <option value="6h">Last 6 hours</option>
-          <option value="24h" selected>Last 24 hours</option>
-          <option value="7d">Last 7 days</option>
-          <option value="30d">Last 30 days</option>
-          <option value="all">All time</option>
-        </select>
-      </div>
-    </header>
-    <main id="main">
-      <div class="chart-card"><h2>Battery <span class="latest" data-latest="battery_pct">&mdash;</span></h2><div class="chart" id="chart-battery"></div></div>
-      <div class="chart-card"><h2>Battery (mV) <span class="latest" data-latest="battery_mv">&mdash;</span></h2><div class="chart" id="chart-battery-mv"></div></div>
-      <div class="chart-card"><h2>Temperature (PCB) <span class="latest" data-latest="temp_c">&mdash;</span></h2><div class="chart" id="chart-temp"></div></div>
-      <div class="chart-card"><h2>Light <span class="latest" data-latest="lux_pct">&mdash;</span></h2><div class="chart" id="chart-lux"></div></div>
-      <div class="chart-card"><h2>RSSI <span class="latest" data-latest="rssi">&mdash;</span></h2><div class="chart" id="chart-rssi"></div></div>
-      <div class="chart-card"><h2>SNR <span class="latest" data-latest="snr">&mdash;</span></h2><div class="chart" id="chart-snr"></div></div>
-      <div class="chart-card"><h2>Spreading factor <span class="latest" data-latest="sf">&mdash;</span></h2><div class="chart" id="chart-sf"></div></div>
-      <div class="chart-card"><h2>Fix quality <span class="latest" data-latest="fix_quality">&mdash;</span></h2><div class="chart" id="chart-fix"></div></div>
-      <div class="chart-card"><h2>Sats tracked <span class="latest" data-latest="sats_tracked">&mdash;</span></h2><div class="chart" id="chart-sats-tracked"></div></div>
-      <div class="chart-card"><h2>Sats in view <span class="latest" data-latest="sats_in_view">&mdash;</span></h2><div class="chart" id="chart-sats-view"></div></div>
-      <div class="chart-card"><h2>HDOP <span class="latest" data-latest="hdop">&mdash;</span></h2><div class="chart" id="chart-hdop"></div></div>
-      <div class="chart-card"><h2>Speed <span class="latest" data-latest="speed">&mdash;</span></h2><div class="chart" id="chart-speed"></div></div>
-      <div class="chart-card motion-card"><h2>Motion <span class="latest" data-latest="motion_count">&mdash;</span></h2><div class="chart" id="chart-motion"></div></div>
-    </main>
+  <div class="page-bar">
+    <h1>Timeline</h1>
+    <span id="status" class="status">loading&hellip;</span>
+    <label class="auto-refresh" title="Re-fetch every 5 minutes">
+      <input type="checkbox" id="auto-refresh" />
+      Auto-refresh
+    </label>
+    <div class="ranges">
+      <select id="range-select" aria-label="Time range">
+        <option value="1h">Last hour</option>
+        <option value="6h">Last 6 hours</option>
+        <option value="24h" selected>Last 24 hours</option>
+        <option value="7d">Last 7 days</option>
+        <option value="30d">Last 30 days</option>
+        <option value="all">All time</option>
+      </select>
+    </div>
+  </div>
 
-    <script
-      src="https://unpkg.com/uplot@1.6.32/dist/uPlot.iife.min.js"
-      crossorigin="anonymous"
-      is:inline
-    ></script>
-    <script>
-      // @ts-nocheck
-      // Bundled by Astro. window.uPlot comes from the classic CDN <script>
-      // above; classic scripts run before module scripts so it's there by
-      // the time we execute. @ts-nocheck because uPlot's runtime globals
-      // aren't typed in this project.
-      import { wireDashboard } from '../scripts/dashboard';
+  <section class="charts">
+    <div class="chart-card"><h2>Battery <span class="latest" data-latest="battery_pct">&mdash;</span></h2><div class="chart" id="chart-battery"></div></div>
+    <div class="chart-card"><h2>Battery (mV) <span class="latest" data-latest="battery_mv">&mdash;</span></h2><div class="chart" id="chart-battery-mv"></div></div>
+    <div class="chart-card"><h2>Temperature (PCB) <span class="latest" data-latest="temp_c">&mdash;</span></h2><div class="chart" id="chart-temp"></div></div>
+    <div class="chart-card"><h2>Light <span class="latest" data-latest="lux_pct">&mdash;</span></h2><div class="chart" id="chart-lux"></div></div>
+    <div class="chart-card"><h2>RSSI <span class="latest" data-latest="rssi">&mdash;</span></h2><div class="chart" id="chart-rssi"></div></div>
+    <div class="chart-card"><h2>SNR <span class="latest" data-latest="snr">&mdash;</span></h2><div class="chart" id="chart-snr"></div></div>
+    <div class="chart-card"><h2>Spreading factor <span class="latest" data-latest="sf">&mdash;</span></h2><div class="chart" id="chart-sf"></div></div>
+    <div class="chart-card"><h2>Fix quality <span class="latest" data-latest="fix_quality">&mdash;</span></h2><div class="chart" id="chart-fix"></div></div>
+    <div class="chart-card"><h2>Sats tracked <span class="latest" data-latest="sats_tracked">&mdash;</span></h2><div class="chart" id="chart-sats-tracked"></div></div>
+    <div class="chart-card"><h2>Sats in view <span class="latest" data-latest="sats_in_view">&mdash;</span></h2><div class="chart" id="chart-sats-view"></div></div>
+    <div class="chart-card"><h2>HDOP <span class="latest" data-latest="hdop">&mdash;</span></h2><div class="chart" id="chart-hdop"></div></div>
+    <div class="chart-card"><h2>Speed <span class="latest" data-latest="speed">&mdash;</span></h2><div class="chart" id="chart-speed"></div></div>
+    <div class="chart-card motion-card"><h2>Motion <span class="latest" data-latest="motion_count">&mdash;</span></h2><div class="chart" id="chart-motion"></div></div>
+  </section>
 
-      const uPlot = window.uPlot;
-        const statusEl = document.getElementById('status');
-        const setStatus = (m) => { if (statusEl) statusEl.textContent = m; };
+  <script
+    src="https://unpkg.com/uplot@1.6.32/dist/uPlot.iife.min.js"
+    crossorigin="anonymous"
+    is:inline
+  ></script>
+  <script>
+    // @ts-nocheck
+    // Bundled by Astro. window.uPlot comes from the classic CDN <script>
+    // above; classic scripts run before module scripts so it's there by
+    // the time we execute. @ts-nocheck because uPlot's runtime globals
+    // aren't typed in this project.
+    import { wireDashboard } from '../scripts/dashboard';
 
-        // uPlot draws axes on <canvas>; the 'currentColor' CSS keyword doesn't
-        // resolve inside canvas fillStyle so axis text would render as the
-        // canvas default (near-black) and disappear on dark themes. Read the
-        // body computed colour and pass it explicitly. Re-evaluated on each
-        // chart build so OS theme switches are picked up on the next reload.
-        const axisColor = getComputedStyle(document.body).color || '#888';
-        const gridColor = 'rgba(127,127,127,0.18)';
+    const uPlot = window.uPlot;
+      const statusEl = document.getElementById('status');
+      const setStatus = (m) => { if (statusEl) statusEl.textContent = m; };
 
-        // One uPlot per chart. Stored so we can destroy + recreate on range change.
-        const charts = {};
+      // uPlot draws axes on <canvas>; the 'currentColor' CSS keyword doesn't
+      // resolve inside canvas fillStyle so axis text would render as the
+      // canvas default (near-black) and disappear on dark themes. Read the
+      // body computed colour and pass it explicitly. Re-evaluated on each
+      // chart build so OS theme switches are picked up on the next reload.
+      const axisColor = getComputedStyle(document.body).color || '#888';
+      const gridColor = 'rgba(127,127,127,0.18)';
 
-        function destroyAll() {
-          for (const k of Object.keys(charts)) {
-            try { charts[k].destroy(); } catch (e) { /* noop */ }
-            delete charts[k];
-          }
+      // One uPlot per chart. Stored so we can destroy + recreate on range change.
+      const charts = {};
+
+      function destroyAll() {
+        for (const k of Object.keys(charts)) {
+          try { charts[k].destroy(); } catch (e) { /* noop */ }
+          delete charts[k];
         }
-
-        // Pick a reasonable y-range so flat data doesn't render as a zero-line.
-        function autoRange(values, opts) {
-          const o = opts || {};
-          const finite = values.filter((v) => v != null && Number.isFinite(v));
-          if (finite.length === 0) return [0, 1];
-          let lo = Math.min.apply(null, finite);
-          let hi = Math.max.apply(null, finite);
-          if (lo === hi) { lo -= 1; hi += 1; }
-          const pad = (hi - lo) * 0.1;
-          lo -= pad; hi += pad;
-          if (o.min != null && lo < o.min) lo = o.min;
-          if (o.max != null && hi > o.max) hi = o.max;
-          return [lo, hi];
-        }
-
-        function makeChart(containerId, xs, ys, opts) {
-          const el = document.getElementById(containerId);
-          if (!el) return null;
-          el.innerHTML = '';
-          const width = el.clientWidth || 600;
-          const height = el.clientHeight || 130;
-          const unit = opts.unit || '';
-          const decimals = opts.decimals != null ? opts.decimals : 0;
-          const seriesOpts = Object.assign({
-            label: opts.label,
-            stroke: opts.color || '#1d68d0',
-            width: 1.5,
-            points: { show: xs.length < 200 },
-            value: (_, v) => v == null ? '—' : (opts.fmt ? opts.fmt(v) : v.toFixed(2)),
-            spanGaps: false,
-          }, opts.series || {});
-          if (opts.step && uPlot.paths && uPlot.paths.stepped) {
-            seriesOpts.paths = uPlot.paths.stepped({ align: 1 });
-          }
-          const series = [{}, seriesOpts];
-          const range = autoRange(ys, opts);
-          // Force ~5 evenly spaced y-axis ticks. uPlot's default picker leans
-          // minimalist for short charts (1-2 ticks); we want enough gridlines
-          // that the eye can interpolate values without guessing. Charts can
-          // override with a hand-picked splits array for integer-valued data.
-          const tickCount = opts.tickCount || 5;
-          const fixedSplits = opts.splits;
-          const ySplits = fixedSplits
-            ? () => fixedSplits
-            : (_, axisIdx, scaleMin, scaleMax) => {
-                const out = [];
-                const step = (scaleMax - scaleMin) / (tickCount - 1);
-                for (let i = 0; i < tickCount; i++) out.push(scaleMin + i * step);
-                return out;
-              };
-          // y-axis tick formatter: append unit so each gridline is self-describing.
-          const yValues = (_, splits) => splits.map((v) => {
-            if (v == null || !Number.isFinite(v)) return '';
-            const s = decimals > 0 ? v.toFixed(decimals) : Math.round(v).toString();
-            return s + unit;
-          });
-          const config = {
-            width, height, series,
-            scales: { y: { range: () => range } },
-            axes: [
-              { stroke: axisColor, grid: { stroke: gridColor } },
-              {
-                stroke: axisColor,
-                grid: { stroke: gridColor },
-                size: 60,
-                splits: ySplits,
-                values: yValues,
-              },
-            ],
-            legend: { show: false },
-            cursor: { y: false },
-          };
-          return new uPlot(config, [xs, ys], el);
-        }
-
-        function makeMotionChart(xs, motionVals) {
-          const el = document.getElementById('chart-motion');
-          if (!el) return null;
-          el.innerHTML = '';
-          const width = el.clientWidth || 600;
-          const height = el.clientHeight || 60;
-          return new uPlot({
-            width, height,
-            series: [
-              {},
-              {
-                label: 'motion',
-                stroke: 'orange',
-                fill: 'rgba(255,165,0,0.45)',
-                paths: uPlot.paths.bars && uPlot.paths.bars({ size: [0.6] }),
-                value: (_, v) => v === 1 ? 'yes' : 'no',
-              },
-            ],
-            scales: { y: { range: () => [0, 1.1] } },
-            axes: [
-              { stroke: axisColor, grid: { stroke: gridColor } },
-              { stroke: axisColor, grid: { stroke: gridColor }, size: 50, values: (_, splits) => splits.map((v) => v === 0 ? '' : v === 1 ? '✓' : '') },
-            ],
-            legend: { show: false },
-            cursor: { y: false },
-          }, [xs, motionVals], el);
-        }
-
-        function setLatest(key, text) {
-          const el = document.querySelector(`[data-latest="${key}"]`);
-          if (el) el.textContent = text;
-        }
-
-        async function load(range) {
-          setStatus('loading ' + range + '…');
-          destroyAll();
-          let body;
-          try {
-            const res = await fetch('/api/points?range=' + encodeURIComponent(range), { credentials: 'same-origin' });
-            if (!res.ok) { setStatus('error: HTTP ' + res.status); return; }
-            body = await res.json();
-          } catch (e) {
-            setStatus('error: ' + e.message);
-            return;
-          }
-          const points = body.points || [];
-          if (points.length === 0) {
-            setStatus('no data in ' + range);
-            return;
-          }
-
-          // uPlot wants seconds, our ts is ms.
-          const xs = points.map((p) => p.ts / 1000);
-
-          const batteryPct = points.map((p) => p.battery_pct);
-          const batteryMv  = points.map((p) => p.battery_mv);
-          const tempC      = points.map((p) => p.temp_c);
-          const luxPct     = points.map((p) => p.lux_pct);
-          const rssi       = points.map((p) => p.rssi);
-          const snr        = points.map((p) => p.snr);
-          const sf         = points.map((p) => p.sf);
-          const fixQuality = points.map((p) => p.fix);
-          const satsTracked = points.map((p) => p.sats_tracked);
-          const satsInView  = points.map((p) => p.sats_in_view);
-          const hdop       = points.map((p) => p.hdop);
-          const speed      = points.map((p) => p.speed);
-          const motion     = points.map((p) => p.motion ? 1 : 0);
-
-          const fixLabel = (v) => {
-            const i = Math.round(v);
-            return i === 0 ? '0 invalid' : i === 1 ? '1 GPS' : i === 2 ? '2 DGPS' : String(i);
-          };
-
-          charts.battery   = makeChart('chart-battery',    xs, batteryPct, { label: 'battery %', color: '#3aaa3a', min: 0, max: 100, unit: '%',     decimals: 0, fmt: (v) => v.toFixed(0) + '%' });
-          charts.batteryMv = makeChart('chart-battery-mv', xs, batteryMv,  { label: 'mV',        color: '#2a8d2a',                  unit: ' mV',   decimals: 0, fmt: (v) => v.toFixed(0) + ' mV' });
-          charts.temp      = makeChart('chart-temp',       xs, tempC,      { label: '°C',        color: '#c33',                     unit: ' °C',   decimals: 1, fmt: (v) => v.toFixed(1) + ' °C' });
-          charts.lux       = makeChart('chart-lux',        xs, luxPct,     { label: 'light %',   color: '#d4a017', min: 0, max: 100, unit: '%',     decimals: 0, fmt: (v) => v.toFixed(0) + '%' });
-          charts.rssi      = makeChart('chart-rssi',       xs, rssi,       { label: 'dBm',       color: '#1d68d0',                  unit: ' dBm',  decimals: 0, fmt: (v) => v.toFixed(0) + ' dBm' });
-          charts.snr       = makeChart('chart-snr',        xs, snr,        { label: 'dB',        color: '#8a44d3',                  unit: ' dB',   decimals: 1, fmt: (v) => v.toFixed(1) + ' dB' });
-          // SF is integer-valued (7..12); step plotting + integer-only ticks at exactly SF7..SF12.
-          charts.sf        = makeChart('chart-sf',         xs, sf,         { label: 'SF', color: '#0d7c7c', min: 6.5, max: 12.5, unit: '', decimals: 0, step: true, splits: [7, 8, 9, 10, 11, 12], fmt: (v) => 'SF' + Math.round(v) });
-          // Fix quality: 0=invalid, 1=GPS, 2=DGPS. Discrete; step plot.
-          charts.fix       = makeChart('chart-fix',        xs, fixQuality, { label: 'fix', color: '#7c3a8b', min: -0.2, max: 2.2, unit: '', decimals: 0, step: true, splits: [0, 1, 2], fmt: fixLabel });
-          charts.satsTracked = makeChart('chart-sats-tracked', xs, satsTracked, { label: 'sats', color: '#1d68d0', min: 0, unit: '', decimals: 0, fmt: (v) => v.toFixed(0) });
-          charts.satsInView  = makeChart('chart-sats-view',    xs, satsInView,  { label: 'sats', color: '#1d68d0', min: 0, unit: '', decimals: 0, fmt: (v) => v.toFixed(0) });
-          charts.hdop      = makeChart('chart-hdop',       xs, hdop,       { label: 'HDOP', color: '#c33', min: 0, unit: '', decimals: 1, fmt: (v) => v.toFixed(2) });
-          charts.speed     = makeChart('chart-speed',      xs, speed,      { label: 'km/h', color: '#3aaa3a', min: 0, unit: ' km/h', decimals: 0, fmt: (v) => v.toFixed(0) + ' km/h' });
-          charts.motion    = makeMotionChart(xs, motion);
-
-          // Latest values in the card headers.
-          const last = points[points.length - 1];
-          const fmt = (v, suffix) => v == null ? '—' : (typeof v === 'number' ? v : Number(v)) + suffix;
-          setLatest('battery_pct', fmt(last.battery_pct, '%'));
-          setLatest('battery_mv',  fmt(last.battery_mv,  ' mV'));
-          setLatest('temp_c',      last.temp_c == null ? '—' : last.temp_c.toFixed(2) + ' °C');
-          setLatest('lux_pct',     fmt(last.lux_pct, '%'));
-          setLatest('rssi',        fmt(last.rssi,   ' dBm'));
-          setLatest('snr',         last.snr == null ? '—' : last.snr.toFixed(1) + ' dB');
-          setLatest('sf',          last.sf == null ? '—' : 'SF' + last.sf);
-          setLatest('fix_quality', last.fix == null ? '—' : fixLabel(last.fix));
-          setLatest('sats_tracked', last.sats_tracked == null ? '—' : String(last.sats_tracked));
-          setLatest('sats_in_view', last.sats_in_view == null ? '—' : String(last.sats_in_view));
-          setLatest('hdop',        last.hdop == null ? '—' : last.hdop.toFixed(2));
-          setLatest('speed',       last.speed == null ? '—' : last.speed + ' km/h');
-          const motionCount = motion.reduce((a, b) => a + b, 0);
-          setLatest('motion_count', motionCount + ' of ' + points.length);
-
-        setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + range + ')' + (body.truncated ? ' — truncated' : ''));
       }
 
-      wireDashboard({
-        selectId: 'range-select',
-        checkboxId: 'auto-refresh',
-        load,
-        resize: true,  // uPlot doesn't auto-resize, so rebuild on viewport change
-      });
-    </script>
-  </body>
-</html>
+      // Pick a reasonable y-range so flat data doesn't render as a zero-line.
+      function autoRange(values, opts) {
+        const o = opts || {};
+        const finite = values.filter((v) => v != null && Number.isFinite(v));
+        if (finite.length === 0) return [0, 1];
+        let lo = Math.min.apply(null, finite);
+        let hi = Math.max.apply(null, finite);
+        if (lo === hi) { lo -= 1; hi += 1; }
+        const pad = (hi - lo) * 0.1;
+        lo -= pad; hi += pad;
+        if (o.min != null && lo < o.min) lo = o.min;
+        if (o.max != null && hi > o.max) hi = o.max;
+        return [lo, hi];
+      }
+
+      function makeChart(containerId, xs, ys, opts) {
+        const el = document.getElementById(containerId);
+        if (!el) return null;
+        el.innerHTML = '';
+        const width = el.clientWidth || 600;
+        const height = el.clientHeight || 130;
+        const unit = opts.unit || '';
+        const decimals = opts.decimals != null ? opts.decimals : 0;
+        const seriesOpts = Object.assign({
+          label: opts.label,
+          stroke: opts.color || '#1d68d0',
+          width: 1.5,
+          points: { show: xs.length < 200 },
+          value: (_, v) => v == null ? '—' : (opts.fmt ? opts.fmt(v) : v.toFixed(2)),
+          spanGaps: false,
+        }, opts.series || {});
+        if (opts.step && uPlot.paths && uPlot.paths.stepped) {
+          seriesOpts.paths = uPlot.paths.stepped({ align: 1 });
+        }
+        const series = [{}, seriesOpts];
+        const range = autoRange(ys, opts);
+        // Force ~5 evenly spaced y-axis ticks. uPlot's default picker leans
+        // minimalist for short charts (1-2 ticks); we want enough gridlines
+        // that the eye can interpolate values without guessing. Charts can
+        // override with a hand-picked splits array for integer-valued data.
+        const tickCount = opts.tickCount || 5;
+        const fixedSplits = opts.splits;
+        const ySplits = fixedSplits
+          ? () => fixedSplits
+          : (_, axisIdx, scaleMin, scaleMax) => {
+              const out = [];
+              const step = (scaleMax - scaleMin) / (tickCount - 1);
+              for (let i = 0; i < tickCount; i++) out.push(scaleMin + i * step);
+              return out;
+            };
+        // y-axis tick formatter: append unit so each gridline is self-describing.
+        const yValues = (_, splits) => splits.map((v) => {
+          if (v == null || !Number.isFinite(v)) return '';
+          const s = decimals > 0 ? v.toFixed(decimals) : Math.round(v).toString();
+          return s + unit;
+        });
+        const config = {
+          width, height, series,
+          scales: { y: { range: () => range } },
+          axes: [
+            { stroke: axisColor, grid: { stroke: gridColor } },
+            {
+              stroke: axisColor,
+              grid: { stroke: gridColor },
+              size: 60,
+              splits: ySplits,
+              values: yValues,
+            },
+          ],
+          legend: { show: false },
+          cursor: { y: false },
+        };
+        return new uPlot(config, [xs, ys], el);
+      }
+
+      function makeMotionChart(xs, motionVals) {
+        const el = document.getElementById('chart-motion');
+        if (!el) return null;
+        el.innerHTML = '';
+        const width = el.clientWidth || 600;
+        const height = el.clientHeight || 60;
+        return new uPlot({
+          width, height,
+          series: [
+            {},
+            {
+              label: 'motion',
+              stroke: 'orange',
+              fill: 'rgba(255,165,0,0.45)',
+              paths: uPlot.paths.bars && uPlot.paths.bars({ size: [0.6] }),
+              value: (_, v) => v === 1 ? 'yes' : 'no',
+            },
+          ],
+          scales: { y: { range: () => [0, 1.1] } },
+          axes: [
+            { stroke: axisColor, grid: { stroke: gridColor } },
+            { stroke: axisColor, grid: { stroke: gridColor }, size: 50, values: (_, splits) => splits.map((v) => v === 0 ? '' : v === 1 ? '✓' : '') },
+          ],
+          legend: { show: false },
+          cursor: { y: false },
+        }, [xs, motionVals], el);
+      }
+
+      function setLatest(key, text) {
+        const el = document.querySelector(`[data-latest="${key}"]`);
+        if (el) el.textContent = text;
+      }
+
+      async function load(range) {
+        setStatus('loading ' + range + '…');
+        destroyAll();
+        let body;
+        try {
+          const res = await fetch('/api/points?range=' + encodeURIComponent(range), { credentials: 'same-origin' });
+          if (!res.ok) { setStatus('error: HTTP ' + res.status); return; }
+          body = await res.json();
+        } catch (e) {
+          setStatus('error: ' + e.message);
+          return;
+        }
+        const points = body.points || [];
+        if (points.length === 0) {
+          setStatus('no data in ' + range);
+          return;
+        }
+
+        // uPlot wants seconds, our ts is ms.
+        const xs = points.map((p) => p.ts / 1000);
+
+        const batteryPct = points.map((p) => p.battery_pct);
+        const batteryMv  = points.map((p) => p.battery_mv);
+        const tempC      = points.map((p) => p.temp_c);
+        const luxPct     = points.map((p) => p.lux_pct);
+        const rssi       = points.map((p) => p.rssi);
+        const snr        = points.map((p) => p.snr);
+        const sf         = points.map((p) => p.sf);
+        const fixQuality = points.map((p) => p.fix);
+        const satsTracked = points.map((p) => p.sats_tracked);
+        const satsInView  = points.map((p) => p.sats_in_view);
+        const hdop       = points.map((p) => p.hdop);
+        const speed      = points.map((p) => p.speed);
+        const motion     = points.map((p) => p.motion ? 1 : 0);
+
+        const fixLabel = (v) => {
+          const i = Math.round(v);
+          return i === 0 ? '0 invalid' : i === 1 ? '1 GPS' : i === 2 ? '2 DGPS' : String(i);
+        };
+
+        charts.battery   = makeChart('chart-battery',    xs, batteryPct, { label: 'battery %', color: '#3aaa3a', min: 0, max: 100, unit: '%',     decimals: 0, fmt: (v) => v.toFixed(0) + '%' });
+        charts.batteryMv = makeChart('chart-battery-mv', xs, batteryMv,  { label: 'mV',        color: '#2a8d2a',                  unit: ' mV',   decimals: 0, fmt: (v) => v.toFixed(0) + ' mV' });
+        charts.temp      = makeChart('chart-temp',       xs, tempC,      { label: '°C',        color: '#c33',                     unit: ' °C',   decimals: 1, fmt: (v) => v.toFixed(1) + ' °C' });
+        charts.lux       = makeChart('chart-lux',        xs, luxPct,     { label: 'light %',   color: '#d4a017', min: 0, max: 100, unit: '%',     decimals: 0, fmt: (v) => v.toFixed(0) + '%' });
+        charts.rssi      = makeChart('chart-rssi',       xs, rssi,       { label: 'dBm',       color: '#1d68d0',                  unit: ' dBm',  decimals: 0, fmt: (v) => v.toFixed(0) + ' dBm' });
+        charts.snr       = makeChart('chart-snr',        xs, snr,        { label: 'dB',        color: '#8a44d3',                  unit: ' dB',   decimals: 1, fmt: (v) => v.toFixed(1) + ' dB' });
+        // SF is integer-valued (7..12); step plotting + integer-only ticks at exactly SF7..SF12.
+        charts.sf        = makeChart('chart-sf',         xs, sf,         { label: 'SF', color: '#0d7c7c', min: 6.5, max: 12.5, unit: '', decimals: 0, step: true, splits: [7, 8, 9, 10, 11, 12], fmt: (v) => 'SF' + Math.round(v) });
+        // Fix quality: 0=invalid, 1=GPS, 2=DGPS. Discrete; step plot.
+        charts.fix       = makeChart('chart-fix',        xs, fixQuality, { label: 'fix', color: '#7c3a8b', min: -0.2, max: 2.2, unit: '', decimals: 0, step: true, splits: [0, 1, 2], fmt: fixLabel });
+        charts.satsTracked = makeChart('chart-sats-tracked', xs, satsTracked, { label: 'sats', color: '#1d68d0', min: 0, unit: '', decimals: 0, fmt: (v) => v.toFixed(0) });
+        charts.satsInView  = makeChart('chart-sats-view',    xs, satsInView,  { label: 'sats', color: '#1d68d0', min: 0, unit: '', decimals: 0, fmt: (v) => v.toFixed(0) });
+        charts.hdop      = makeChart('chart-hdop',       xs, hdop,       { label: 'HDOP', color: '#c33', min: 0, unit: '', decimals: 1, fmt: (v) => v.toFixed(2) });
+        charts.speed     = makeChart('chart-speed',      xs, speed,      { label: 'km/h', color: '#3aaa3a', min: 0, unit: ' km/h', decimals: 0, fmt: (v) => v.toFixed(0) + ' km/h' });
+        charts.motion    = makeMotionChart(xs, motion);
+
+        // Latest values in the card headers.
+        const last = points[points.length - 1];
+        const fmt = (v, suffix) => v == null ? '—' : (typeof v === 'number' ? v : Number(v)) + suffix;
+        setLatest('battery_pct', fmt(last.battery_pct, '%'));
+        setLatest('battery_mv',  fmt(last.battery_mv,  ' mV'));
+        setLatest('temp_c',      last.temp_c == null ? '—' : last.temp_c.toFixed(2) + ' °C');
+        setLatest('lux_pct',     fmt(last.lux_pct, '%'));
+        setLatest('rssi',        fmt(last.rssi,   ' dBm'));
+        setLatest('snr',         last.snr == null ? '—' : last.snr.toFixed(1) + ' dB');
+        setLatest('sf',          last.sf == null ? '—' : 'SF' + last.sf);
+        setLatest('fix_quality', last.fix == null ? '—' : fixLabel(last.fix));
+        setLatest('sats_tracked', last.sats_tracked == null ? '—' : String(last.sats_tracked));
+        setLatest('sats_in_view', last.sats_in_view == null ? '—' : String(last.sats_in_view));
+        setLatest('hdop',        last.hdop == null ? '—' : last.hdop.toFixed(2));
+        setLatest('speed',       last.speed == null ? '—' : last.speed + ' km/h');
+        const motionCount = motion.reduce((a, b) => a + b, 0);
+        setLatest('motion_count', motionCount + ' of ' + points.length);
+
+      setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + range + ')' + (body.truncated ? ' — truncated' : ''));
+    }
+
+    wireDashboard({
+      selectId: 'range-select',
+      checkboxId: 'auto-refresh',
+      load,
+      resize: true,  // uPlot doesn't auto-resize, so rebuild on viewport change
+    });
+  </script>
+</Layout>
+
+<style>
+  .charts {
+    padding: 1rem; display: flex; flex-direction: column; gap: 1.25rem;
+    max-width: 64rem; margin: 0 auto; width: 100%;
+  }
+  .chart-card {
+    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+    border-radius: 0.5rem; padding: 0.7rem 0.9rem 0.9rem;
+  }
+  .chart-card h2 {
+    font-size: 0.85rem; font-weight: 500; margin: 0 0 0.5rem;
+    color: color-mix(in srgb, currentColor 70%, transparent);
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .chart-card .latest { font-variant-numeric: tabular-nums; font-weight: 600; color: inherit; }
+  .chart-card .chart { height: 160px; }
+  .motion-card .chart { height: 70px; }
+</style>

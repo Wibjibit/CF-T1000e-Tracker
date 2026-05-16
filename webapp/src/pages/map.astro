@@ -1,155 +1,122 @@
 ---
 // Served via the Worker (not prerendered) so the auth middleware can gate it.
 // The HTML is content-free; all data is fetched client-side from /api/points.
+import Layout from '../layouts/Layout.astro';
 export const prerender = false;
 ---
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>T1000-E Tracker &mdash; map</title>
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-      crossorigin="anonymous"
-    />
-    <style>
-      :root { color-scheme: light dark; }
-      html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, sans-serif; }
-      body { display: flex; flex-direction: column; }
-      header { padding: 0.6rem 1rem; display: flex; align-items: center; gap: 1rem; border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent); flex-wrap: wrap; }
-      header h1 { margin: 0; font-size: 1.05rem; }
-      header a { color: inherit; text-decoration: none; opacity: 0.7; }
-      header a:hover { opacity: 1; }
-      .auto-refresh { display: flex; align-items: center; gap: 0.35em; font-size: 0.85rem; opacity: 0.85; cursor: pointer; }
-      .auto-refresh input { cursor: pointer; }
-      .ranges { margin-left: auto; }
-      .ranges select {
-        font: inherit; padding: 0.35em 0.6em; padding-right: 1.8em; border-radius: 0.3em;
-        border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
-        background: transparent; color: inherit; cursor: pointer;
-        appearance: none; -webkit-appearance: none;
-        background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
-        background-position: calc(100% - 14px) 50%, calc(100% - 8px) 50%;
-        background-size: 6px 6px, 6px 6px;
-        background-repeat: no-repeat;
-      }
-      .ranges select:focus { outline: 2px solid color-mix(in srgb, currentColor 35%, transparent); outline-offset: 1px; }
-      .ranges select option { color: black; background: white; }
-      #status { font-size: 0.85rem; opacity: 0.7; }
-      #map { flex: 1 1 auto; min-height: 0; }
-      /* Force Leaflet attribution to a readable contrast in dark mode. */
-      .leaflet-control-attribution { background: rgba(255, 255, 255, 0.7) !important; color: #222 !important; }
-      .leaflet-control-attribution a { color: #06c !important; }
-    </style>
-  </head>
-  <body>
-    <header>
-      <h1>T1000-E Tracker</h1>
-      <a href="/">&larr; home</a>
-      <a href="/timeline">timeline</a>
-      <a href="/beams">beams</a>
-      <a href="/gateways">gateways</a>
-      <a href="/settings">settings</a>
-      <span id="status">loading&hellip;</span>
-      <label class="auto-refresh" title="Re-fetch every 5 minutes">
-        <input type="checkbox" id="auto-refresh" />
-        Auto-refresh
-      </label>
-      <div class="ranges">
-        <select id="range-select" aria-label="Time range">
-          <option value="1h">Last hour</option>
-          <option value="6h">Last 6 hours</option>
-          <option value="24h" selected>Last 24 hours</option>
-          <option value="7d">Last 7 days</option>
-          <option value="30d">Last 30 days</option>
-          <option value="all">All time</option>
-        </select>
-      </div>
-    </header>
-    <div id="map"></div>
+<Layout title="T1000-E Tracker — map">
+  <link
+    slot="head"
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin="anonymous"
+  />
 
-    <script
-      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-      crossorigin="anonymous"
-      is:inline
-    ></script>
-    <script>
-      // @ts-nocheck
-      // Bundled by Astro. window.L (Leaflet) comes from the classic CDN
-      // <script> above; classic scripts run before module scripts so it's
-      // there by the time we execute. @ts-nocheck because Leaflet's runtime
-      // globals aren't typed in this project — the data flow into the page
-      // is exercised by the existing CI build + manual smoke tests.
-      import { wireDashboard } from '../scripts/dashboard';
+  <div class="page-bar">
+    <h1>Map</h1>
+    <span id="status" class="status">loading&hellip;</span>
+    <label class="auto-refresh" title="Re-fetch every 5 minutes">
+      <input type="checkbox" id="auto-refresh" />
+      Auto-refresh
+    </label>
+    <div class="ranges">
+      <select id="range-select" aria-label="Time range">
+        <option value="1h">Last hour</option>
+        <option value="6h">Last 6 hours</option>
+        <option value="24h" selected>Last 24 hours</option>
+        <option value="7d">Last 7 days</option>
+        <option value="30d">Last 30 days</option>
+        <option value="all">All time</option>
+      </select>
+    </div>
+  </div>
 
-      const L = window.L;
-      const map = L.map('map', { zoomControl: true }).setView([52.5, -1.5], 6);
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      }).addTo(map);
+  <div id="map"></div>
 
-      const statusEl = document.getElementById('status');
-      let polyline = null;
-      let currentMarker = null;
-      let stopMarkers = [];
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin="anonymous"
+    is:inline
+  ></script>
+  <script>
+    // @ts-nocheck
+    // Bundled by Astro. window.L (Leaflet) comes from the classic CDN
+    // <script> above; classic scripts run before module scripts so it's
+    // there by the time we execute. @ts-nocheck because Leaflet's runtime
+    // globals aren't typed in this project — the data flow into the page
+    // is exercised by the existing CI build + manual smoke tests.
+    import { wireDashboard } from '../scripts/dashboard';
 
-      const setStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
+    const L = window.L;
+    const map = L.map('map', { zoomControl: true }).setView([52.5, -1.5], 6);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map);
 
-      function fmtAgo(ts) {
-        const diff = Date.now() - ts;
-        if (diff < 60_000) return Math.floor(diff / 1000) + 's ago';
-        if (diff < 3_600_000) return Math.floor(diff / 60_000) + 'm ago';
-        if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + 'h ago';
-        return Math.floor(diff / 86_400_000) + 'd ago';
-      }
+    const statusEl = document.getElementById('status');
+    let polyline = null;
+    let currentMarker = null;
+    let stopMarkers = [];
 
-      async function load(range) {
-          setStatus('loading ' + range + '…');
-          const res = await fetch('/api/points?range=' + encodeURIComponent(range) + '&with_fix=1', { credentials: 'same-origin' });
-          if (!res.ok) {
-            setStatus('error: HTTP ' + res.status);
-            return;
-          }
-          const body = await res.json();
-          const points = body.points || [];
+    const setStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
 
-          if (polyline) { map.removeLayer(polyline); polyline = null; }
-          if (currentMarker) { map.removeLayer(currentMarker); currentMarker = null; }
-          stopMarkers.forEach((m) => map.removeLayer(m));
-          stopMarkers = [];
+    function fmtAgo(ts) {
+      const diff = Date.now() - ts;
+      if (diff < 60_000) return Math.floor(diff / 1000) + 's ago';
+      if (diff < 3_600_000) return Math.floor(diff / 60_000) + 'm ago';
+      if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + 'h ago';
+      return Math.floor(diff / 86_400_000) + 'd ago';
+    }
 
-          if (points.length === 0) {
-            setStatus('no fixes in ' + range);
-            return;
-          }
+    async function load(range) {
+        setStatus('loading ' + range + '…');
+        const res = await fetch('/api/points?range=' + encodeURIComponent(range) + '&with_fix=1', { credentials: 'same-origin' });
+        if (!res.ok) {
+          setStatus('error: HTTP ' + res.status);
+          return;
+        }
+        const body = await res.json();
+        const points = body.points || [];
 
-          // points is already chronological (ASC). Draw a track polyline.
-          const coords = points.map((p) => [p.lat, p.lon]);
-          polyline = L.polyline(coords, { color: '#1d68d0', weight: 3, opacity: 0.8 }).addTo(map);
+        if (polyline) { map.removeLayer(polyline); polyline = null; }
+        if (currentMarker) { map.removeLayer(currentMarker); currentMarker = null; }
+        stopMarkers.forEach((m) => map.removeLayer(m));
+        stopMarkers = [];
 
-          // Current position = last point.
-          const last = points[points.length - 1];
-          currentMarker = L.marker([last.lat, last.lon]).addTo(map);
-          currentMarker.bindPopup(
-            '<strong>Current</strong><br>' +
-              fmtAgo(last.ts) + '<br>' +
-              'Battery ' + (last.battery_pct ?? '?') + '% (' + (last.battery_mv ?? '?') + ' mV)<br>' +
-              'Temp ' + (last.temp_c ?? '?') + ' &deg;C, Lux ' + (last.lux_pct ?? '?') + '%',
-          );
+        if (points.length === 0) {
+          setStatus('no fixes in ' + range);
+          return;
+        }
 
-        map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
-        setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + range + ')' + (body.truncated ? ' &mdash; truncated' : ''));
-      }
+        // points is already chronological (ASC). Draw a track polyline.
+        const coords = points.map((p) => [p.lat, p.lon]);
+        polyline = L.polyline(coords, { color: '#1d68d0', weight: 3, opacity: 0.8 }).addTo(map);
 
-      wireDashboard({
-        selectId: 'range-select',
-        checkboxId: 'auto-refresh',
-        load,
-      });
-    </script>
-  </body>
-</html>
+        // Current position = last point.
+        const last = points[points.length - 1];
+        currentMarker = L.marker([last.lat, last.lon]).addTo(map);
+        currentMarker.bindPopup(
+          '<strong>Current</strong><br>' +
+            fmtAgo(last.ts) + '<br>' +
+            'Battery ' + (last.battery_pct ?? '?') + '% (' + (last.battery_mv ?? '?') + ' mV)<br>' +
+            'Temp ' + (last.temp_c ?? '?') + ' &deg;C, Lux ' + (last.lux_pct ?? '?') + '%',
+        );
+
+      map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
+      setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + range + ')' + (body.truncated ? ' &mdash; truncated' : ''));
+    }
+
+    wireDashboard({
+      selectId: 'range-select',
+      checkboxId: 'auto-refresh',
+      load,
+    });
+  </script>
+</Layout>
+
+<style>
+  #map { flex: 1 1 auto; min-height: 0; }
+</style>

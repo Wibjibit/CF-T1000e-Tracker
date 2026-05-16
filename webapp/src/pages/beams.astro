@@ -1,299 +1,245 @@
 ---
 // Served via the Worker (not prerendered) so the auth middleware can gate it.
 // All data fetched client-side from /api/beams.
+import Layout from '../layouts/Layout.astro';
 export const prerender = false;
 ---
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>T1000-E Tracker &mdash; beams</title>
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-      crossorigin="anonymous"
-    />
-    <style>
-      :root { color-scheme: light dark; }
-      html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, sans-serif; }
-      body { display: flex; flex-direction: column; }
-      header {
-        padding: 0.6rem 1rem; display: flex; align-items: center;
-        gap: 1rem; border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-        flex-wrap: wrap;
-      }
-      header h1 { margin: 0; font-size: 1.05rem; }
-      header a { color: inherit; text-decoration: none; opacity: 0.7; }
-      header a:hover { opacity: 1; }
-      .auto-refresh { display: flex; align-items: center; gap: 0.35em; font-size: 0.85rem; opacity: 0.85; cursor: pointer; }
-      .auto-refresh input { cursor: pointer; }
-      .color-toggle { display: flex; gap: 0; align-items: center; font-size: 0.85rem; }
-      .color-toggle label {
-        padding: 0.3em 0.7em; cursor: pointer;
-        border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
-      }
-      .color-toggle label:first-of-type { border-radius: 0.3em 0 0 0.3em; border-right: 0; }
-      .color-toggle label:last-of-type  { border-radius: 0 0.3em 0.3em 0; }
-      .color-toggle input { display: none; }
-      .color-toggle input:checked + label {
-        background: color-mix(in srgb, currentColor 18%, transparent);
-        font-weight: 600;
-      }
-      .ranges { margin-left: auto; }
-      .ranges select {
-        font: inherit; padding: 0.35em 0.6em; padding-right: 1.8em; border-radius: 0.3em;
-        border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
-        background: transparent; color: inherit; cursor: pointer;
-        appearance: none; -webkit-appearance: none;
-        background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
-        background-position: calc(100% - 14px) 50%, calc(100% - 8px) 50%;
-        background-size: 6px 6px, 6px 6px;
-        background-repeat: no-repeat;
-      }
-      .ranges select option { color: black; background: white; }
-      #status { font-size: 0.85rem; opacity: 0.7; }
-      #map { flex: 1 1 auto; min-height: 0; position: relative; }
+<Layout title="T1000-E Tracker — beams">
+  <link
+    slot="head"
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin="anonymous"
+  />
 
-      .legend {
-        position: absolute; right: 12px; bottom: 26px; z-index: 500;
-        background: rgba(255, 255, 255, 0.92); color: #222;
-        padding: 0.5em 0.7em; border-radius: 0.4em; font-size: 0.8rem;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.2); line-height: 1.3;
-        min-width: 140px;
-      }
-      .legend strong { display: block; margin-bottom: 0.3em; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
-      .legend .bar { height: 0.6em; border-radius: 0.2em; margin-bottom: 0.25em; }
-      .legend .scale { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+  <div class="page-bar">
+    <h1>Beams</h1>
+    <span id="status" class="status">loading&hellip;</span>
+    <label class="auto-refresh" title="Re-fetch every 5 minutes">
+      <input type="checkbox" id="auto-refresh" />
+      Auto-refresh
+    </label>
+    <div class="color-toggle" role="radiogroup" aria-label="Color beams by">
+      <input type="radio" id="color-rssi" name="color" value="rssi" checked />
+      <label for="color-rssi">RSSI</label>
+      <input type="radio" id="color-snr"  name="color" value="snr" />
+      <label for="color-snr">SNR</label>
+    </div>
+    <div class="ranges">
+      <select id="range-select" aria-label="Time range">
+        <option value="1h">Last hour</option>
+        <option value="6h">Last 6 hours</option>
+        <option value="24h" selected>Last 24 hours</option>
+        <option value="7d">Last 7 days</option>
+        <option value="30d">Last 30 days</option>
+        <option value="all">All time</option>
+      </select>
+    </div>
+  </div>
 
-      .leaflet-control-attribution { background: rgba(255, 255, 255, 0.7) !important; color: #222 !important; }
-      .leaflet-control-attribution a { color: #06c !important; }
-    </style>
-  </head>
-  <body>
-    <header>
-      <h1>T1000-E Tracker</h1>
-      <a href="/">&larr; home</a>
-      <a href="/map">map</a>
-      <a href="/timeline">timeline</a>
-      <a href="/gateways">gateways</a>
-      <a href="/settings">settings</a>
-      <span id="status">loading&hellip;</span>
-      <label class="auto-refresh" title="Re-fetch every 5 minutes">
-        <input type="checkbox" id="auto-refresh" />
-        Auto-refresh
-      </label>
-      <div class="color-toggle" role="radiogroup" aria-label="Color beams by">
-        <input type="radio" id="color-rssi" name="color" value="rssi" checked />
-        <label for="color-rssi">RSSI</label>
-        <input type="radio" id="color-snr"  name="color" value="snr" />
-        <label for="color-snr">SNR</label>
-      </div>
-      <div class="ranges">
-        <select id="range-select" aria-label="Time range">
-          <option value="1h">Last hour</option>
-          <option value="6h">Last 6 hours</option>
-          <option value="24h" selected>Last 24 hours</option>
-          <option value="7d">Last 7 days</option>
-          <option value="30d">Last 30 days</option>
-          <option value="all">All time</option>
-        </select>
-      </div>
-    </header>
-    <div id="map">
-      <div class="legend">
-        <strong id="legend-title">RSSI (dBm)</strong>
-        <div class="bar" id="legend-bar"></div>
-        <div class="scale">
-          <span id="legend-min">-120</span>
-          <span id="legend-max">-50</span>
-        </div>
+  <div id="map">
+    <div class="legend">
+      <strong id="legend-title">RSSI (dBm)</strong>
+      <div class="bar" id="legend-bar"></div>
+      <div class="scale">
+        <span id="legend-min">-120</span>
+        <span id="legend-max">-50</span>
       </div>
     </div>
+  </div>
 
-    <script
-      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-      crossorigin="anonymous"
-      is:inline
-    ></script>
-    <script>
-      // @ts-nocheck
-      import { wireDashboard } from '../scripts/dashboard';
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin="anonymous"
+    is:inline
+  ></script>
+  <script>
+    // @ts-nocheck
+    import { wireDashboard } from '../scripts/dashboard';
 
-      const L = window.L;
-      const map = L.map('map', { zoomControl: true }).setView([52.5, -1.5], 6);
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      }).addTo(map);
+    const L = window.L;
+    const map = L.map('map', { zoomControl: true }).setView([52.5, -1.5], 6);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map);
 
-      const statusEl = document.getElementById('status');
-      const setStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
+    const statusEl = document.getElementById('status');
+    const setStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
 
-      // Layer groups so we can wipe and redraw without touching tiles.
-      const beamLayer = L.layerGroup().addTo(map);
-      const gwLayer = L.layerGroup().addTo(map);
-      const devLayer = L.layerGroup().addTo(map);
+    // Layer groups so we can wipe and redraw without touching tiles.
+    const beamLayer = L.layerGroup().addTo(map);
+    const gwLayer = L.layerGroup().addTo(map);
+    const devLayer = L.layerGroup().addTo(map);
 
-      // RSSI / SNR scales (linear hue interpolation). RSSI -120..-50, SNR -20..+10.
-      // Match TTN Mapper's visual roughly: red (bad) → green (good).
-      const SCALES = {
-        rssi: { min: -120, max: -50,  unit: 'dBm', label: 'RSSI (dBm)' },
-        snr:  { min:  -20, max:  10,  unit: 'dB',  label: 'SNR (dB)'   },
-      };
+    // RSSI / SNR scales (linear hue interpolation). RSSI -120..-50, SNR -20..+10.
+    // Match TTN Mapper's visual roughly: red (bad) → green (good).
+    const SCALES = {
+      rssi: { min: -120, max: -50,  unit: 'dBm', label: 'RSSI (dBm)' },
+      snr:  { min:  -20, max:  10,  unit: 'dB',  label: 'SNR (dB)'   },
+    };
 
-      function colorFor(value, scale) {
-        if (value == null) return '#888';
-        const clamped = Math.max(scale.min, Math.min(scale.max, value));
-        const t = (clamped - scale.min) / (scale.max - scale.min);
-        const hue = Math.round(t * 120); // 0 = red, 120 = green
-        return `hsl(${hue}, 80%, 45%)`;
-      }
+    function colorFor(value, scale) {
+      if (value == null) return '#888';
+      const clamped = Math.max(scale.min, Math.min(scale.max, value));
+      const t = (clamped - scale.min) / (scale.max - scale.min);
+      const hue = Math.round(t * 120); // 0 = red, 120 = green
+      return `hsl(${hue}, 80%, 45%)`;
+    }
 
-      function fmtAgo(ts) {
-        const diff = Date.now() - ts;
-        if (diff < 60_000) return Math.floor(diff / 1000) + 's ago';
-        if (diff < 3_600_000) return Math.floor(diff / 60_000) + 'm ago';
-        if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + 'h ago';
-        return Math.floor(diff / 86_400_000) + 'd ago';
-      }
+    function fmtAgo(ts) {
+      const diff = Date.now() - ts;
+      if (diff < 60_000) return Math.floor(diff / 1000) + 's ago';
+      if (diff < 3_600_000) return Math.floor(diff / 60_000) + 'm ago';
+      if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + 'h ago';
+      return Math.floor(diff / 86_400_000) + 'd ago';
+    }
 
-      function shortGw(id) {
-        if (!id) return '—';
-        const m = String(id).match(/[0-9a-fA-F]{4}$/);
-        return m ? '…' + m[0] : id;
-      }
+    function updateLegend(metric) {
+      const s = SCALES[metric];
+      document.getElementById('legend-title').textContent = s.label;
+      document.getElementById('legend-min').textContent = s.min;
+      document.getElementById('legend-max').textContent = s.max;
+      document.getElementById('legend-bar').style.background =
+        `linear-gradient(to right,
+          hsl(0,80%,45%),
+          hsl(30,80%,45%),
+          hsl(60,80%,45%),
+          hsl(90,80%,45%),
+          hsl(120,80%,45%))`;
+    }
 
-      function updateLegend(metric) {
-        const s = SCALES[metric];
-        document.getElementById('legend-title').textContent = s.label;
-        document.getElementById('legend-min').textContent = s.min;
-        document.getElementById('legend-max').textContent = s.max;
-        document.getElementById('legend-bar').style.background =
-          `linear-gradient(to right,
-            hsl(0,80%,45%),
-            hsl(30,80%,45%),
-            hsl(60,80%,45%),
-            hsl(90,80%,45%),
-            hsl(120,80%,45%))`;
-      }
+    let lastData = null;
+    let currentMetric = 'rssi';
 
-      let lastData = null;
-      let currentMetric = 'rssi';
+    function render(metric) {
+      currentMetric = metric;
+      updateLegend(metric);
+      if (!lastData) return;
 
-      function render(metric) {
-        currentMetric = metric;
-        updateLegend(metric);
-        if (!lastData) return;
+      beamLayer.clearLayers();
+      gwLayer.clearLayers();
+      devLayer.clearLayers();
 
-        beamLayer.clearLayers();
-        gwLayer.clearLayers();
-        devLayer.clearLayers();
+      const beams = lastData.beams || [];
+      if (beams.length === 0) return;
 
-        const beams = lastData.beams || [];
-        if (beams.length === 0) return;
+      const scale = SCALES[metric];
+      const allPoints = [];
+      const gwSeen = new Map();
+      const devSeen = new Map();
 
-        const scale = SCALES[metric];
-        const allPoints = [];
-        const gwSeen = new Map(); // gw_id -> {lat, lon, name, count}
-        const devSeen = new Map(); // f_cnt -> {lat, lon, ts}
+      for (const b of beams) {
+        const v = metric === 'rssi' ? b.rssi : b.snr;
+        const color = colorFor(v, scale);
+        const line = L.polyline(
+          [[b.gw_lat, b.gw_lon], [b.dev_lat, b.dev_lon]],
+          { color, weight: 2, opacity: 0.65 },
+        );
+        line.bindPopup(
+          '<strong>' + (b.gw_name || b.gw_id) + '</strong><br>' +
+          'RSSI: ' + (b.rssi ?? '—') + ' dBm<br>' +
+          'SNR: '  + (b.snr  != null ? b.snr.toFixed(2) : '—') + ' dB<br>' +
+          'f_cnt: ' + b.f_cnt + ' &middot; ' + fmtAgo(b.ts),
+        );
+        line.addTo(beamLayer);
+        allPoints.push([b.gw_lat, b.gw_lon], [b.dev_lat, b.dev_lon]);
 
-        for (const b of beams) {
-          const v = metric === 'rssi' ? b.rssi : b.snr;
-          const color = colorFor(v, scale);
-          const line = L.polyline(
-            [[b.gw_lat, b.gw_lon], [b.dev_lat, b.dev_lon]],
-            { color, weight: 2, opacity: 0.65 },
-          );
-          line.bindPopup(
-            '<strong>' + (b.gw_name || b.gw_id) + '</strong><br>' +
-            'RSSI: ' + (b.rssi ?? '—') + ' dBm<br>' +
-            'SNR: '  + (b.snr  != null ? b.snr.toFixed(2) : '—') + ' dB<br>' +
-            'f_cnt: ' + b.f_cnt + ' &middot; ' + fmtAgo(b.ts),
-          );
-          line.addTo(beamLayer);
-          allPoints.push([b.gw_lat, b.gw_lon], [b.dev_lat, b.dev_lon]);
-
-          if (!gwSeen.has(b.gw_id)) {
-            gwSeen.set(b.gw_id, { lat: b.gw_lat, lon: b.gw_lon, name: b.gw_name, count: 1 });
-          } else {
-            gwSeen.get(b.gw_id).count += 1;
-          }
-          if (!devSeen.has(b.f_cnt)) {
-            devSeen.set(b.f_cnt, { lat: b.dev_lat, lon: b.dev_lon, ts: b.ts });
-          }
-        }
-
-        // Gateway markers (squares) on top of beams.
-        for (const [id, gw] of gwSeen) {
-          const marker = L.circleMarker([gw.lat, gw.lon], {
-            radius: 7, color: '#222', weight: 2, fillColor: '#ffcd3c', fillOpacity: 0.9,
-          });
-          marker.bindPopup(
-            '<strong>' + (gw.name || id) + '</strong><br>' +
-            id + '<br>' +
-            gw.count + ' beam' + (gw.count === 1 ? '' : 's') + ' in view<br>' +
-            '<a href="/gateways#' + encodeURIComponent(id) + '">manage &rarr;</a>',
-          );
-          marker.addTo(gwLayer);
-        }
-
-        // Device fixes (smaller circles).
-        for (const [fCnt, p] of devSeen) {
-          const marker = L.circleMarker([p.lat, p.lon], {
-            radius: 4, color: '#1d68d0', weight: 1.5, fillColor: '#1d68d0', fillOpacity: 0.7,
-          });
-          marker.bindPopup(
-            '<strong>Device fix</strong><br>' +
-            'f_cnt: ' + fCnt + '<br>' + fmtAgo(p.ts),
-          );
-          marker.addTo(devLayer);
-        }
-
-        if (allPoints.length > 0) {
-          const bounds = L.latLngBounds(allPoints);
-          map.fitBounds(bounds, { padding: [40, 40] });
-        }
-      }
-
-      async function load(range) {
-        setStatus('loading ' + range + '…');
-        const res = await fetch('/api/beams?range=' + encodeURIComponent(range), {
-          credentials: 'same-origin',
-        });
-        if (!res.ok) {
-          setStatus('error: HTTP ' + res.status);
-          return;
-        }
-        lastData = await res.json();
-        const n = lastData.beams ? lastData.beams.length : 0;
-        const gwCount = new Set((lastData.beams || []).map((b) => b.gw_id)).size;
-        if (n === 0) {
-          setStatus('no beams in ' + range + ' (need located gateways; see /gateways)');
+        if (!gwSeen.has(b.gw_id)) {
+          gwSeen.set(b.gw_id, { lat: b.gw_lat, lon: b.gw_lon, name: b.gw_name, count: 1 });
         } else {
-          setStatus(
-            n + ' beam' + (n === 1 ? '' : 's') + ' across ' +
-            gwCount + ' gateway' + (gwCount === 1 ? '' : 's') +
-            ' (' + range + ')' +
-            (lastData.truncated ? ' — truncated' : ''),
-          );
+          gwSeen.get(b.gw_id).count += 1;
         }
-        render(currentMetric);
+        if (!devSeen.has(b.f_cnt)) {
+          devSeen.set(b.f_cnt, { lat: b.dev_lat, lon: b.dev_lon, ts: b.ts });
+        }
       }
 
-      // RSSI/SNR toggle re-renders without re-fetching.
-      document.querySelectorAll('input[name="color"]').forEach((el) => {
-        el.addEventListener('change', (e) => {
-          if (e.target.checked) render(e.target.value);
+      // Gateway markers on top of beams.
+      for (const [id, gw] of gwSeen) {
+        const marker = L.circleMarker([gw.lat, gw.lon], {
+          radius: 7, color: '#222', weight: 2, fillColor: '#ffcd3c', fillOpacity: 0.9,
         });
-      });
+        marker.bindPopup(
+          '<strong>' + (gw.name || id) + '</strong><br>' +
+          id + '<br>' +
+          gw.count + ' beam' + (gw.count === 1 ? '' : 's') + ' in view<br>' +
+          '<a href="/gateways#' + encodeURIComponent(id) + '">manage &rarr;</a>',
+        );
+        marker.addTo(gwLayer);
+      }
 
-      wireDashboard({
-        selectId: 'range-select',
-        checkboxId: 'auto-refresh',
-        load,
+      // Device fixes (smaller circles).
+      for (const [fCnt, p] of devSeen) {
+        const marker = L.circleMarker([p.lat, p.lon], {
+          radius: 4, color: '#1d68d0', weight: 1.5, fillColor: '#1d68d0', fillOpacity: 0.7,
+        });
+        marker.bindPopup(
+          '<strong>Device fix</strong><br>' +
+          'f_cnt: ' + fCnt + '<br>' + fmtAgo(p.ts),
+        );
+        marker.addTo(devLayer);
+      }
+
+      if (allPoints.length > 0) {
+        const bounds = L.latLngBounds(allPoints);
+        map.fitBounds(bounds, { padding: [40, 40] });
+      }
+    }
+
+    async function load(range) {
+      setStatus('loading ' + range + '…');
+      const res = await fetch('/api/beams?range=' + encodeURIComponent(range), {
+        credentials: 'same-origin',
       });
-    </script>
-  </body>
-</html>
+      if (!res.ok) {
+        setStatus('error: HTTP ' + res.status);
+        return;
+      }
+      lastData = await res.json();
+      const n = lastData.beams ? lastData.beams.length : 0;
+      const gwCount = new Set((lastData.beams || []).map((b) => b.gw_id)).size;
+      if (n === 0) {
+        setStatus('no beams in ' + range + ' (need located gateways; see /gateways)');
+      } else {
+        setStatus(
+          n + ' beam' + (n === 1 ? '' : 's') + ' across ' +
+          gwCount + ' gateway' + (gwCount === 1 ? '' : 's') +
+          ' (' + range + ')' +
+          (lastData.truncated ? ' — truncated' : ''),
+        );
+      }
+      render(currentMetric);
+    }
+
+    // RSSI/SNR toggle re-renders without re-fetching.
+    document.querySelectorAll('input[name="color"]').forEach((el) => {
+      el.addEventListener('change', (e) => {
+        if (e.target.checked) render(e.target.value);
+      });
+    });
+
+    wireDashboard({
+      selectId: 'range-select',
+      checkboxId: 'auto-refresh',
+      load,
+    });
+  </script>
+</Layout>
+
+<style>
+  #map { flex: 1 1 auto; min-height: 0; position: relative; }
+
+  .legend {
+    position: absolute; right: 12px; bottom: 26px; z-index: 500;
+    background: rgba(255, 255, 255, 0.92); color: #222;
+    padding: 0.5em 0.7em; border-radius: 0.4em; font-size: 0.8rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2); line-height: 1.3;
+    min-width: 140px;
+  }
+  .legend strong { display: block; margin-bottom: 0.3em; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .legend .bar { height: 0.6em; border-radius: 0.2em; margin-bottom: 0.25em; }
+  .legend .scale { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+</style>

@@ -90,6 +90,25 @@ Once the Worker is reachable, point your TTN application at it:
    - **Enabled event types:** tick **Uplink message** only. Leave the path field blank (the base URL is the endpoint).
 3. Save. Within ~2 minutes you should see the first uplink land — verify in TTN Console → Live Data (should show 200 status for `as.up.data.forward`), and on the dashboard landing card.
 
+## Layout & nav
+
+All authenticated pages render through `src/layouts/Layout.astro`. The Layout owns `<html>`, `<head>`, and the persistent left sidebar; pages emit their content via the default slot.
+
+The sidebar groups pages by section:
+
+- **Live** — `/`, `/map`
+- **History** — `/timeline`
+- **Coverage** — `/beams`, `/gateways`
+- **Admin (footer)** — `/settings`, Sign out
+
+Behavior:
+
+- A chevron at the top of the sidebar collapses it to a ~56 px icon rail. State persists in `localStorage` (`tracker.sidebar.collapsed`); applied to `<html>` before paint so there's no FOUC.
+- At ≤720 px the sidebar is hidden behind a hamburger drawer with a backdrop. Pure CSS, driven by a hidden `<input type="checkbox">` + `:checked`. Tapping any link auto-closes the drawer.
+- Each link has both an inline SVG icon (used standalone in the icon-rail state) and a `link-label` span (hidden when collapsed). The active link is highlighted from `Astro.url.pathname`, so pages don't need to pass an `activePath` prop unless they want to override it.
+
+Page-specific controls (range select, auto-refresh, RSSI/SNR toggle) live in a shared `.page-bar` strip at the top of each page's content — styles for it are in Layout's global `<style is:global>` block so every page gets a consistent control row without duplication.
+
 ## Routes
 
 | Path | Auth | Notes |

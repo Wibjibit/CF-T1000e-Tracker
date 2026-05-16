@@ -29,12 +29,22 @@ Bindings (see `webapp/wrangler.jsonc`):
 | `/` | GET | session cookie | SSR landing — mini map (Leaflet, zoom 16) + GPS / Sensors / Radio detail sections |
 | `/map` | GET | session cookie | SSR shell; client-side Leaflet + OSM polyline by range; auto-refresh checkbox |
 | `/timeline` | GET | session cookie | SSR shell; client-side uPlot for every captured field (battery, mV, temp, lux, RSSI, SNR, SF, fix quality, sats tracked, sats in view, HDOP, speed, motion); auto-refresh checkbox |
-| `/settings` | GET, POST | session cookie | Forwarder config form (toggle / URL / email / experiment) + audit log of last 50 forward attempts |
+| `/beams` | GET | session cookie | SSR shell; client-side Leaflet polylines from each receiving gateway to the device for every uplink in range, coloured by RSSI or SNR via an HSL gradient |
+| `/gateways` | GET | session cookie | SSR table of every gateway ever heard in `rx_metadata`, with TTN-fetched name/location, per-gateway aggregates, sortable columns, filter chips, per-row refresh + hide + manual lat/lon override actions |
+| `/settings` | GET, POST | session cookie | Forwarder config + TTN gateway-API config (bearer key + NS host) + audit log of last 50 forward attempts |
 | `/login` | GET | none (public) | TOTP entry form |
-| `/api/ingest` | POST | TTN HTTP Basic auth (public-ish) | Receive TTN webhook, validate, insert into D1, optionally forward to TTN Mapper via `waitUntil` |
+| `/api/ingest` | POST | TTN HTTP Basic auth (public-ish) | Receive TTN webhook, validate, insert into D1, optionally forward to TTN Mapper via `waitUntil`, and fan out lazy gateway-metadata lookups for any new/stale `gateway_id` seen in `rx_metadata` |
 | `/api/points` | GET | session cookie | `?range=1h\|6h\|24h\|7d\|30d\|all&with_fix=1` — chronological points, capped 5000 |
+| `/api/beams` | GET | session cookie | `?range=…` — one row per (uplink × receiving gateway) for the `/beams` view. Joins parsed `rx_metadata` against the `gateways` cache; drops hidden / unlocated / (0,0) gateways |
+| `/api/gateways` | GET, POST | session cookie | GET = list with aggregates + sanity badges; POST body `{action: refresh\|refresh_all\|set_manual_location\|clear_manual_location\|hide\|unhide, gateway_id?, latitude?, longitude?, altitude?}` |
 | `/api/auth/verify` | POST | rate-limited (D1) | Validate TOTP code, issue signed session cookie |
 | `/api/auth/logout` | GET, POST | session cookie | Clear cookie |
+
+### Layout & nav structure
+
+All authenticated pages render through `src/layouts/Layout.astro`. It owns `<html>`, `<head>`, the global `<style is:global>` block, and a persistent left sidebar that groups pages into **Live** (`/`, `/map`), **History** (`/timeline`), **Coverage** (`/beams`, `/gateways`), and **Admin** (`/settings`, sign out). Pages emit their content via the default slot; the leaflet stylesheet goes through a named `head` slot on the three pages that need it.
+
+The sidebar's collapse state (full-width vs ~56 px icon rail) is toggled by a chevron button and persisted in `localStorage`; the class is applied to `<html>` from an inline `<script is:inline>` in `<head>` so the layout doesn't flash on the first paint after navigation. At ≤720 px the sidebar is hidden behind a hamburger drawer driven by a hidden `<input type="checkbox">` + `:checked` — no JS needed for the drawer itself. Active link highlight is derived from `Astro.url.pathname` inside the Layout, so pages never need to pass a prop. Page-level controls (range select, auto-refresh checkbox, RSSI/SNR toggle on `/beams`) live in a shared `.page-bar` strip at the top of each page's content, with styles defined once in Layout's global block.
 
 ### Middleware
 
@@ -58,8 +68,9 @@ Migration files in `webapp/migrations/`. Apply locally with `wrangler d1 migrati
 |---|---|
 | `uplinks` | One row per LoRaWAN uplink; PK `(dev_eui, f_cnt)` for idempotency. Stores decoded payload fields, best-gateway radio metadata, spreading factor, and the raw TTN `ApplicationUp` JSON. |
 | `auth_attempts` | Sliding-window TOTP rate limit. `(ip, ts)` with indexes on both. |
-| `settings` | Generic key/value config (`ttnmapper_enabled`, `ttnmapper_url`, `ttnmapper_email`, `ttnmapper_experiment`). Seeded with defaults; edited from `/settings`. |
+| `settings` | Generic key/value config. Forwarder: `ttnmapper_enabled`, `ttnmapper_url`, `ttnmapper_email`, `ttnmapper_experiment`. TTN gateway API: `ttn_api_key`, `ttn_ns_host`. Seeded with defaults; edited from `/settings`. |
 | `forward_log` | Audit trail for outbound forwards: timestamp, target URL, HTTP status, duration, error snippet. |
+| `gateways` | Cache of TTN gateway metadata (name, lat/lon/alt, status) keyed on `gateway_id`. Includes manual override columns (`latitude_manual` / `longitude_manual` / `altitude_manual`) and a `hidden` flag to exclude bad gateways from `/beams`. Populated lazily by the ingest hook (sighting on every uplink, refresh-on-stale via the TTN `/api/v3/gateways/{id}` endpoint) and via per-row / refresh-all actions on `/gateways`. |
 
 The raw `ApplicationUp` JSON is retained alongside decoded columns so payload-format changes can be re-applied retroactively without losing data.
 

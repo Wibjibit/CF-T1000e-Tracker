@@ -1,6 +1,7 @@
 ---
 import { env } from 'cloudflare:workers';
 import { formatAgo, formatLatLon } from '../lib/format';
+import Layout from '../layouts/Layout.astro';
 
 interface LatestRow {
   ts: number;
@@ -55,62 +56,22 @@ function fixLabel(fix: number | null | undefined): string {
 
 function shortGateway(id: string | null): string {
   if (!id) return '—';
-  // eui-3234333640004d00 -> 4d00
   const m = id.match(/[0-9a-fA-F]{4}$/);
   return m ? '…' + m[0] : id;
 }
 ---
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>T1000-E Tracker</title>
-    {latestWithFix !== null && (
-      <link
-        rel="stylesheet"
-        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-        crossorigin="anonymous"
-      />
-    )}
-    <style>
-      :root { color-scheme: light dark; }
-      body { font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5; }
-      h1 { margin-bottom: 0.25rem; }
-      .sub { color: color-mix(in srgb, currentColor 55%, transparent); margin-top: 0; }
-      .card { border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 0.5rem; padding: 1rem 1.25rem; margin: 1rem 0; }
-      .row { display: flex; justify-content: space-between; gap: 1rem; }
-      .row + .row { margin-top: 0.35rem; }
-      .label { color: color-mix(in srgb, currentColor 55%, transparent); }
-      .value { font-variant-numeric: tabular-nums; }
-      .group { margin-top: 0.85rem; padding-top: 0.85rem; border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent); }
-      .group-title { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: color-mix(in srgb, currentColor 50%, transparent); margin-bottom: 0.45rem; }
-      .pill { display: inline-block; padding: 0.05em 0.5em; border-radius: 999px; font-size: 0.78em; background: color-mix(in srgb, currentColor 12%, transparent); }
-      .pill.motion { background: color-mix(in srgb, orange 30%, transparent); }
-      a.button { display: inline-block; padding: 0.5em 0.9em; border-radius: 0.4em; background: color-mix(in srgb, currentColor 12%, transparent); color: inherit; text-decoration: none; }
-      a.button:hover { background: color-mix(in srgb, currentColor 22%, transparent); }
-      code { background: color-mix(in srgb, currentColor 10%, transparent); padding: 0.1em 0.3em; border-radius: 0.2em; font-size: 0.9em; }
+<Layout title="T1000-E Tracker">
+  {latestWithFix !== null && (
+    <link
+      slot="head"
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin="anonymous"
+    />
+  )}
 
-      /* Mini map: clickable preview of the latest fix; full controls live on /map. */
-      .mini-map-link { display: block; margin: 1rem 0; text-decoration: none; }
-      .mini-map {
-        height: 240px; width: 100%;
-        border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
-        border-radius: 0.5rem; overflow: hidden;
-        cursor: pointer; position: relative;
-      }
-      .mini-map-hint {
-        position: absolute; right: 0.5rem; top: 0.5rem; z-index: 500;
-        background: rgba(255,255,255,0.85); color: #222;
-        padding: 0.1em 0.5em; border-radius: 0.25em; font-size: 0.75rem;
-        pointer-events: none;
-      }
-      /* Force Leaflet attribution to a readable contrast in dark mode. */
-      .leaflet-control-attribution { background: rgba(255, 255, 255, 0.7) !important; color: #222 !important; }
-      .leaflet-control-attribution a { color: #06c !important; }
-    </style>
-  </head>
-  <body>
+  <section class="home">
     <h1>T1000-E Tracker</h1>
     <p class="sub">SenseCAP T1000-E over The Things Network &mdash; EU868</p>
 
@@ -259,60 +220,108 @@ function shortGateway(id: string | null): string {
           </div>
         </div>
 
-        <p>
+        <p class="actions">
           <a class="button" href="/map">View on map &rarr;</a>
-          <a class="button" href="/timeline" style="margin-left: 0.5em">Timeline &rarr;</a>
-          <a class="button" href="/beams" style="margin-left: 0.5em">Beams &rarr;</a>
+          <a class="button" href="/timeline">Timeline &rarr;</a>
+          <a class="button" href="/beams">Beams &rarr;</a>
         </p>
       </>
     )}
+  </section>
 
-    <p class="sub" style="margin-top: 3rem">
-      <a href="/gateways">gateways</a> &middot;
-      <a href="/settings">settings</a> &middot;
-      <a href="/api/auth/logout">sign out</a>
-    </p>
+  {latestWithFix !== null && (
+    <>
+      <script
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin="anonymous"
+        is:inline
+      ></script>
+      <script is:inline>
+        // @ts-nocheck
+        (() => {
+          const el = document.getElementById('mini-map');
+          if (!el || !window.L) return;
+          const lat = parseFloat(el.getAttribute('data-lat'));
+          const lon = parseFloat(el.getAttribute('data-lon'));
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
 
-    {latestWithFix !== null && (
-      <>
-        <script
-          src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-          crossorigin="anonymous"
-          is:inline
-        ></script>
-        <script is:inline>
-          // @ts-nocheck
-          (() => {
-            const el = document.getElementById('mini-map');
-            if (!el || !window.L) return;
-            const lat = parseFloat(el.getAttribute('data-lat'));
-            const lon = parseFloat(el.getAttribute('data-lon'));
-            if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+          // Static-ish: no controls, no scroll/drag — the whole tile is wrapped
+          // in <a href="/map">, so any click navigates to the full map.
+          const map = L.map(el, {
+            center: [lat, lon],
+            zoom: 16,
+            zoomControl: false,
+            dragging: false,
+            scrollWheelZoom: false,
+            doubleClickZoom: false,
+            touchZoom: false,
+            boxZoom: false,
+            keyboard: false,
+            tap: false,
+            attributionControl: true,
+          });
+          L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+          }).addTo(map);
+          L.marker([lat, lon]).addTo(map);
+        })();
+      </script>
+    </>
+  )}
+</Layout>
 
-            // Static-ish: no controls, no scroll/drag — the whole tile is wrapped
-            // in <a href="/map">, so any click navigates to the full map.
-            const map = L.map(el, {
-              center: [lat, lon],
-              zoom: 16,
-              zoomControl: false,
-              dragging: false,
-              scrollWheelZoom: false,
-              doubleClickZoom: false,
-              touchZoom: false,
-              boxZoom: false,
-              keyboard: false,
-              tap: false,
-              attributionControl: true,
-            });
-            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-              maxZoom: 19,
-              attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-            }).addTo(map);
-            L.marker([lat, lon]).addTo(map);
-          })();
-        </script>
-      </>
-    )}
-  </body>
-</html>
+<style>
+  .home { max-width: 36rem; margin: 3rem auto; padding: 0 1rem; }
+  .home h1 { margin-bottom: 0.25rem; }
+  .sub { color: color-mix(in srgb, currentColor 55%, transparent); margin-top: 0; }
+  .card {
+    border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+    border-radius: 0.5rem; padding: 1rem 1.25rem; margin: 1rem 0;
+  }
+  .row { display: flex; justify-content: space-between; gap: 1rem; }
+  .row + .row { margin-top: 0.35rem; }
+  .label { color: color-mix(in srgb, currentColor 55%, transparent); }
+  .value { font-variant-numeric: tabular-nums; }
+  .group {
+    margin-top: 0.85rem; padding-top: 0.85rem;
+    border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  }
+  .group-title {
+    font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase;
+    color: color-mix(in srgb, currentColor 50%, transparent);
+    margin-bottom: 0.45rem;
+  }
+  .pill {
+    display: inline-block; padding: 0.05em 0.5em; border-radius: 999px;
+    font-size: 0.78em; background: color-mix(in srgb, currentColor 12%, transparent);
+  }
+  .pill.motion { background: color-mix(in srgb, orange 30%, transparent); }
+  .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  a.button {
+    display: inline-block; padding: 0.5em 0.9em; border-radius: 0.4em;
+    background: color-mix(in srgb, currentColor 12%, transparent);
+    color: inherit; text-decoration: none;
+  }
+  a.button:hover { background: color-mix(in srgb, currentColor 22%, transparent); }
+  code {
+    background: color-mix(in srgb, currentColor 10%, transparent);
+    padding: 0.1em 0.3em; border-radius: 0.2em; font-size: 0.9em;
+  }
+
+  /* Mini map preview of the latest fix; full controls live on /map. */
+  .mini-map-link { display: block; margin: 1rem 0; text-decoration: none; }
+  .mini-map {
+    height: 240px; width: 100%;
+    border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+    border-radius: 0.5rem; overflow: hidden;
+    cursor: pointer; position: relative;
+  }
+  .mini-map-hint {
+    position: absolute; right: 0.5rem; top: 0.5rem; z-index: 500;
+    background: rgba(255,255,255,0.85); color: #222;
+    padding: 0.1em 0.5em; border-radius: 0.25em; font-size: 0.75rem;
+    pointer-events: none;
+  }
+</style>

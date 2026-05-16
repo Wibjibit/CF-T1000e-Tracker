@@ -9,6 +9,7 @@ import {
   TTN_NS_HOST_DEFAULT,
 } from '../lib/settings';
 import { formatAgo } from '../lib/format';
+import Layout from '../layouts/Layout.astro';
 
 export const prerender = false;
 
@@ -59,18 +60,13 @@ function statusBadge(status: number): { text: string; cls: string } {
   return { text: String(status), cls: 'bad' };
 }
 ---
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Settings &mdash; T1000-E Tracker</title>
-    <style>
-      :root { color-scheme: light dark; }
-      body { font-family: system-ui, sans-serif; max-width: 56rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
-      header { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
-      header h1 { margin: 0; font-size: 1.4rem; }
-      header a { color: inherit; opacity: 0.65; text-decoration: none; font-size: 0.92rem; }
-      header a:hover { opacity: 1; }
+<Layout title="Settings">
+  <section class="page">
+    <h1 class="page-title">Settings</h1>
+
+<style>
+      .page { max-width: 56rem; margin: 2rem auto; padding: 0 1rem; width: 100%; }
+      .page-title { margin: 0 0 1.25rem; font-size: 1.4rem; }
 
       section.card {
         border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
@@ -108,17 +104,6 @@ function statusBadge(status: number): { text: string; cls: string } {
 
       .empty { padding: 1.5rem; text-align: center; opacity: 0.55; font-size: 0.95rem; }
     </style>
-  </head>
-  <body>
-    <header>
-      <h1>Settings</h1>
-      <a href="/">&larr; home</a>
-      <a href="/map">map</a>
-      <a href="/timeline">timeline</a>
-      <a href="/beams">beams</a>
-      <a href="/gateways">gateways</a>
-      <a href="/api/auth/logout" style="margin-left: auto">sign out</a>
-    </header>
 
     {saved && <div class="toast ok">Saved{savedSection === 'ttn_api' ? ' TTN API config' : savedSection === 'forwarder' ? ' forwarder config' : ''}.</div>}
     {saveError && <div class="toast bad">Could not save: {saveError}</div>}
@@ -245,5 +230,5 @@ function statusBadge(status: number): { text: string; cls: string } {
         </table>
       )}
     </section>
-  </body>
-</html>
+  </section>
+</Layout>
