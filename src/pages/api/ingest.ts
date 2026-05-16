@@ -18,6 +18,9 @@ interface ApplicationUp {
       rssi?: number;
       snr?: number;
     }>;
+    network_ids?: {
+      cluster_address?: string;
+    };
   };
   received_at?: string;
 }
@@ -75,18 +78,23 @@ async function forwardToTtnMapper(
   fCnt: number,
   email: string,
   experiment: string,
+  ttsDomain: string,
 ): Promise<void> {
   const started = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FORWARD_TIMEOUT_MS);
   let status = 0;
   let error: string | null = null;
-  // TTN Mapper's TTS v3 integration requires the contributor email in a
-  // TTNMAPPERORG-USER header (returns 403 "email address is empty" without it).
-  // TTNMAPPERORG-EXPERIMENT is optional; when set, traffic is tagged as test
-  // data and stays off the main coverage map.
+  // TTN Mapper's TTS v3 integration requires three headers when TTN isn't
+  // the direct sender (see ttnmapper/ingress-api tts_handlers.go):
+  //   - TTNMAPPERORG-USER:  contributor email; 403 "email address is empty" without
+  //   - X-TTS-DOMAIN:       cluster address; 400 "Originating network server header
+  //                         not set" without. TTN sets this when forwarding directly;
+  //                         we mirror it here from uplink_message.network_ids.cluster_address.
+  //   - TTNMAPPERORG-EXPERIMENT: optional. Tags traffic as test data.
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (email) headers['TTNMAPPERORG-USER'] = email;
+  if (ttsDomain) headers['X-TTS-DOMAIN'] = ttsDomain;
   if (experiment) headers['TTNMAPPERORG-EXPERIMENT'] = experiment;
   try {
     const res = await fetch(url, {
@@ -229,8 +237,16 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const forwarder = await readForwarderConfig(env.DB);
     if (forwarder.enabled && forwarder.url) {
       const forwardBody = JSON.stringify(body);
+      const ttsDomain = body.uplink_message?.network_ids?.cluster_address ?? '';
       locals.cfContext.waitUntil(
-        forwardToTtnMapper(forwarder.url, forwardBody, fCnt, forwarder.email, forwarder.experiment),
+        forwardToTtnMapper(
+          forwarder.url,
+          forwardBody,
+          fCnt,
+          forwarder.email,
+          forwarder.experiment,
+          ttsDomain,
+        ),
       );
     }
   }
