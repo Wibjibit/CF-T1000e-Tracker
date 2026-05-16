@@ -1,0 +1,64 @@
+---
+// Static login page; the POST goes to /api/auth/verify.
+export const prerender = true;
+
+const errorParam = Astro.url.searchParams.get('error');
+const errorMessage = errorParam === 'invalid'
+  ? 'Incorrect code.'
+  : errorParam === 'ratelimit'
+    ? 'Too many attempts. Try again in 10 minutes.'
+    : errorParam === 'config'
+      ? 'TOTP_SECRET not set on the server.'
+      : null;
+const returnTo = Astro.url.searchParams.get('return_to') ?? '/';
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in &mdash; T1000-E Tracker</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, sans-serif; max-width: 22rem; margin: 6rem auto; padding: 0 1rem; line-height: 1.5; text-align: center; }
+      h1 { margin-bottom: 0.25rem; }
+      .sub { color: color-mix(in srgb, currentColor 55%, transparent); margin-top: 0; }
+      form { margin-top: 2rem; display: flex; flex-direction: column; gap: 0.75rem; }
+      input[name="code"] {
+        font: inherit; font-size: 1.4rem; letter-spacing: 0.4rem; text-align: center;
+        padding: 0.6em; border-radius: 0.4em;
+        border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+        background: transparent; color: inherit;
+        font-variant-numeric: tabular-nums;
+      }
+      button {
+        font: inherit; padding: 0.65em 1em; border-radius: 0.4em; border: 0; cursor: pointer;
+        background: color-mix(in srgb, currentColor 18%, transparent); color: inherit;
+      }
+      button:hover { background: color-mix(in srgb, currentColor 28%, transparent); }
+      .error {
+        color: #c33; background: color-mix(in srgb, #c33 12%, transparent);
+        border-radius: 0.4em; padding: 0.5em 0.8em; margin-top: 0.5rem; font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>T1000-E Tracker</h1>
+    <p class="sub">Enter the 6-digit code from your authenticator.</p>
+
+    <form method="POST" action="/api/auth/verify">
+      <input type="hidden" name="return_to" value={returnTo} />
+      <input
+        type="text"
+        name="code"
+        inputmode="numeric"
+        pattern="[0-9]{6}"
+        maxlength="6"
+        autocomplete="one-time-code"
+        autofocus
+        required
+      />
+      <button type="submit">Sign in</button>
+      {errorMessage && <div class="error">{errorMessage}</div>}
+    </form>
+  </body>
+</html>

@@ -1,0 +1,76 @@
+import type { APIRoute } from 'astro';
+import { env } from 'cloudflare:workers';
+import { verifyTOTP } from '../../../lib/totp';
+import { signSession, buildSessionCookie } from '../../../lib/session';
+
+export const prerender = false;
+
+// Sliding-window rate limit: at most this many attempts per IP per window.
+const RL_WINDOW_MS = 10 * 60 * 1000;
+const RL_MAX_ATTEMPTS = 10;
+
+function safeReturnTo(raw: string | null): string {
+  // Only honour same-origin paths starting with '/' and not '//'.
+  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return '/';
+  return raw;
+}
+
+function redirect(target: string, headers: Headers): Response {
+  headers.set('Location', target);
+  return new Response(null, { status: 303, headers });
+}
+
+export const POST: APIRoute = async ({ request, url }) => {
+  if (!env.TOTP_SECRET || !env.COOKIE_SECRET) {
+    return redirect('/login?error=config', new Headers());
+  }
+
+  const ip = request.headers.get('cf-connecting-ip') ?? '0.0.0.0';
+  const now = Date.now();
+  const cutoff = now - RL_WINDOW_MS;
+
+  // Best-effort cleanup of old rows. Cheap because of the (ts) index.
+  await env.DB.prepare(`DELETE FROM auth_attempts WHERE ts < ?`).bind(cutoff).run();
+
+  const countRow = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM auth_attempts WHERE ip = ? AND ts > ?`,
+  )
+    .bind(ip, cutoff)
+    .first<{ n: number }>();
+  const attempts = countRow?.n ?? 0;
+
+  if (attempts >= RL_MAX_ATTEMPTS) {
+    return redirect('/login?error=ratelimit', new Headers());
+  }
+
+  // Record this attempt up-front so a flood of parallel requests can't all
+  // squeak through under the limit.
+  await env.DB.prepare(`INSERT INTO auth_attempts (ip, ts) VALUES (?, ?)`).bind(ip, now).run();
+
+  // Astro parses form bodies via request.formData() for application/x-www-form-urlencoded.
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    return redirect('/login?error=invalid', new Headers());
+  }
+  const code = (form.get('code') ?? '').toString().trim();
+  const returnTo = safeReturnTo((form.get('return_to') ?? '').toString());
+
+  const ok = await verifyTOTP(env.TOTP_SECRET, code, now);
+  if (!ok) {
+    return redirect(`/login?error=invalid&return_to=${encodeURIComponent(returnTo)}`, new Headers());
+  }
+
+  // On success, clear this IP's attempts so a successful login doesn't leave
+  // the user one wrong-tap away from a 10-minute lockout.
+  await env.DB.prepare(`DELETE FROM auth_attempts WHERE ip = ?`).bind(ip).run();
+
+  const token = await signSession(env.COOKIE_SECRET);
+  const headers = new Headers();
+  headers.append(
+    'Set-Cookie',
+    buildSessionCookie(token, { secure: url.protocol === 'https:' }),
+  );
+  return redirect(returnTo, headers);
+};

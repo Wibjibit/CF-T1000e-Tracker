@@ -1,7 +1,7 @@
 ---
-// Static page. All data fetched client-side from /api/points so the map can
-// be re-ranged without an SSR round trip.
-export const prerender = true;
+// Served via the Worker (not prerendered) so the auth middleware can gate it.
+// The HTML is content-free; all data is fetched client-side from /api/points.
+export const prerender = false;
 ---
 <html lang="en">
   <head>
