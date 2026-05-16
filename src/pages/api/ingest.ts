@@ -110,7 +110,15 @@ async function forwardToTtnMapper(
       error = text ? text.slice(0, 240) : `HTTP ${res.status}`;
     }
   } catch (e) {
-    error = e instanceof Error ? e.message : String(e);
+    // Distinguish abort/timeout (the common case with TTN Mapper's jammed
+    // publish channel) from genuine network errors. Surface 504 in the log
+    // so the badge is informative rather than generic.
+    if (e instanceof Error && e.name === 'AbortError') {
+      status = 504;
+      error = `Upstream did not respond within ${FORWARD_TIMEOUT_MS / 1000}s (TTN Mapper queue jammed; known TTS v3 upstream issue)`;
+    } else {
+      error = e instanceof Error ? e.message : String(e);
+    }
   } finally {
     clearTimeout(timer);
   }
