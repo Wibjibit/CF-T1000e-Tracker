@@ -18,6 +18,13 @@ interface ApplicationUp {
       rssi?: number;
       snr?: number;
     }>;
+    settings?: {
+      data_rate?: {
+        lora?: {
+          spreading_factor?: number;
+        };
+      };
+    };
     network_ids?: {
       cluster_address?: string;
     };
@@ -193,6 +200,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return (cur.rssi ?? -999) > (acc.rssi ?? -999) ? cur : acc;
   }, null);
 
+  const spreadingFactor = body.uplink_message?.settings?.data_rate?.lora?.spreading_factor ?? null;
+
   // 6. Timestamps: prefer the uplink's received_at, fall back to envelope, then now.
   const receivedAtIso =
     body.uplink_message?.received_at ?? body.received_at ?? new Date().toISOString();
@@ -206,9 +215,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
        sats_tracked, sats_in_view, fix_quality, speed_kmh,
        uart_bytes_rx, uart_lines_parsed,
        battery_pct, battery_mv, temp_c, lux_pct, motion,
-       rssi, snr, gateway_id,
+       rssi, snr, gateway_id, spreading_factor,
        raw_json
-     ) VALUES (?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?,  ?, ?, ?, ?, ?,  ?, ?, ?,  ?)`,
+     ) VALUES (?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?,  ?, ?, ?, ?, ?,  ?, ?, ?, ?,  ?)`,
   )
     .bind(
       devEui,
@@ -232,6 +241,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       best?.rssi ?? null,
       best?.snr ?? null,
       best?.gateway_ids?.gateway_id ?? null,
+      spreadingFactor,
       JSON.stringify(body),
     )
     .run();

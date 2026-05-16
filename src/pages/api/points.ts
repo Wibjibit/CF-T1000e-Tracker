@@ -25,6 +25,7 @@ interface PointRow {
   motion: 0 | 1;
   rssi: number | null;
   snr: number | null;
+  sf: number | null;
 }
 
 export const GET: APIRoute = async ({ url }) => {
@@ -53,7 +54,7 @@ export const GET: APIRoute = async ({ url }) => {
            latitude AS lat, longitude AS lon, altitude_m AS alt,
            fix_quality AS fix, sats_tracked AS sats, hdop, speed_kmh AS speed,
            battery_pct, battery_mv, temp_c, lux_pct, motion,
-           rssi, snr
+           rssi, snr, spreading_factor AS sf
       FROM uplinks
      WHERE received_at >= ?
        ${onlyWithFix ? 'AND fix_quality > 0 AND latitude IS NOT NULL' : ''}

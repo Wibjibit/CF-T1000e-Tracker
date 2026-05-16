@@ -81,6 +81,7 @@ export const prerender = false;
       <div class="chart-card"><h2>Light <span class="latest" data-latest="lux_pct">&mdash;</span></h2><div class="chart" id="chart-lux"></div></div>
       <div class="chart-card"><h2>RSSI <span class="latest" data-latest="rssi">&mdash;</span></h2><div class="chart" id="chart-rssi"></div></div>
       <div class="chart-card"><h2>SNR <span class="latest" data-latest="snr">&mdash;</span></h2><div class="chart" id="chart-snr"></div></div>
+      <div class="chart-card"><h2>Spreading factor <span class="latest" data-latest="sf">&mdash;</span></h2><div class="chart" id="chart-sf"></div></div>
       <div class="chart-card motion-card"><h2>Motion <span class="latest" data-latest="motion_count">&mdash;</span></h2><div class="chart" id="chart-motion"></div></div>
     </main>
 
@@ -126,24 +127,33 @@ export const prerender = false;
           el.innerHTML = '';
           const width = el.clientWidth || 600;
           const height = el.clientHeight || 130;
-          const series = [
-            {},
-            Object.assign({
-              label: opts.label,
-              stroke: opts.color || '#1d68d0',
-              width: 1.5,
-              points: { show: xs.length < 200 },
-              value: (_, v) => v == null ? '—' : (opts.fmt ? opts.fmt(v) : v.toFixed(2)),
-              spanGaps: false,
-            }, opts.series || {}),
-          ];
+          const unit = opts.unit || '';
+          const decimals = opts.decimals != null ? opts.decimals : 0;
+          const seriesOpts = Object.assign({
+            label: opts.label,
+            stroke: opts.color || '#1d68d0',
+            width: 1.5,
+            points: { show: xs.length < 200 },
+            value: (_, v) => v == null ? '—' : (opts.fmt ? opts.fmt(v) : v.toFixed(2)),
+            spanGaps: false,
+          }, opts.series || {});
+          if (opts.step && uPlot.paths && uPlot.paths.stepped) {
+            seriesOpts.paths = uPlot.paths.stepped({ align: 1 });
+          }
+          const series = [{}, seriesOpts];
           const range = autoRange(ys, opts);
+          // y-axis tick formatter: append unit so each gridline is self-describing.
+          const yValues = (_, splits) => splits.map((v) => {
+            if (v == null || !Number.isFinite(v)) return '';
+            const s = decimals > 0 ? v.toFixed(decimals) : Math.round(v).toString();
+            return s + unit;
+          });
           const config = {
             width, height, series,
             scales: { y: { range: () => range } },
             axes: [
               { stroke: 'currentColor', grid: { stroke: 'rgba(127,127,127,0.15)' } },
-              { stroke: 'currentColor', grid: { stroke: 'rgba(127,127,127,0.15)' }, size: 50 },
+              { stroke: 'currentColor', grid: { stroke: 'rgba(127,127,127,0.15)' }, size: 60, values: yValues },
             ],
             legend: { show: false },
             cursor: { y: false },
@@ -211,14 +221,17 @@ export const prerender = false;
           const luxPct     = points.map((p) => p.lux_pct);
           const rssi       = points.map((p) => p.rssi);
           const snr        = points.map((p) => p.snr);
+          const sf         = points.map((p) => p.sf);
           const motion     = points.map((p) => p.motion ? 1 : 0);
 
-          charts.battery   = makeChart('chart-battery',    xs, batteryPct, { label: 'battery %', color: '#3aaa3a', min: 0,    max: 100, fmt: (v) => v.toFixed(0) + '%' });
-          charts.batteryMv = makeChart('chart-battery-mv', xs, batteryMv,  { label: 'mV',        color: '#2a8d2a', fmt: (v) => v.toFixed(0) + ' mV' });
-          charts.temp      = makeChart('chart-temp',       xs, tempC,      { label: '°C',        color: '#c33',    fmt: (v) => v.toFixed(2) + ' °C' });
-          charts.lux       = makeChart('chart-lux',        xs, luxPct,     { label: 'light %',   color: '#d4a017', min: 0, max: 100, fmt: (v) => v.toFixed(0) + '%' });
-          charts.rssi      = makeChart('chart-rssi',       xs, rssi,       { label: 'dBm',       color: '#1d68d0', fmt: (v) => v.toFixed(0) + ' dBm' });
-          charts.snr       = makeChart('chart-snr',        xs, snr,        { label: 'dB',        color: '#8a44d3', fmt: (v) => v.toFixed(1) + ' dB' });
+          charts.battery   = makeChart('chart-battery',    xs, batteryPct, { label: 'battery %', color: '#3aaa3a', min: 0, max: 100, unit: '%',     decimals: 0, fmt: (v) => v.toFixed(0) + '%' });
+          charts.batteryMv = makeChart('chart-battery-mv', xs, batteryMv,  { label: 'mV',        color: '#2a8d2a',                  unit: ' mV',   decimals: 0, fmt: (v) => v.toFixed(0) + ' mV' });
+          charts.temp      = makeChart('chart-temp',       xs, tempC,      { label: '°C',        color: '#c33',                     unit: ' °C',   decimals: 1, fmt: (v) => v.toFixed(2) + ' °C' });
+          charts.lux       = makeChart('chart-lux',        xs, luxPct,     { label: 'light %',   color: '#d4a017', min: 0, max: 100, unit: '%',     decimals: 0, fmt: (v) => v.toFixed(0) + '%' });
+          charts.rssi      = makeChart('chart-rssi',       xs, rssi,       { label: 'dBm',       color: '#1d68d0',                  unit: ' dBm',  decimals: 0, fmt: (v) => v.toFixed(0) + ' dBm' });
+          charts.snr       = makeChart('chart-snr',        xs, snr,        { label: 'dB',        color: '#8a44d3',                  unit: ' dB',   decimals: 1, fmt: (v) => v.toFixed(1) + ' dB' });
+          // SF is integer-valued (7..12); step plotting + integer-only ticks.
+          charts.sf        = makeChart('chart-sf',         xs, sf,         { label: 'SF',        color: '#0d7c7c', min: 6.5, max: 12.5, unit: '', decimals: 0, step: true, fmt: (v) => 'SF' + Math.round(v) });
           charts.motion    = makeMotionChart(xs, motion);
 
           // Latest values in the card headers.
@@ -230,6 +243,7 @@ export const prerender = false;
           setLatest('lux_pct',     fmt(last.lux_pct, '%'));
           setLatest('rssi',        fmt(last.rssi,   ' dBm'));
           setLatest('snr',         last.snr == null ? '—' : last.snr.toFixed(1) + ' dB');
+          setLatest('sf',          last.sf == null ? '—' : 'SF' + last.sf);
           const motionCount = motion.reduce((a, b) => a + b, 0);
           setLatest('motion_count', motionCount + ' of ' + points.length);
 
