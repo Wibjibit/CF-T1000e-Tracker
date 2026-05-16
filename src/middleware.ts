@@ -19,7 +19,13 @@ const PUBLIC_EXACT = new Set<string>([
 const DEV_PREFIXES = ['/_astro/', '/@vite/', '/@id/', '/@fs/', '/node_modules/', '/src/'];
 
 function isPublic(path: string): boolean {
-  if (PUBLIC_EXACT.has(path)) return true;
+  // Normalize away a trailing slash before lookup. Cloudflare's Static Assets
+  // serves prerendered pages at /foo/, and during build-time prerender the
+  // middleware is invoked with the same trailing-slash form — both must hit
+  // the same allowlist entry, otherwise an unauth redirect gets baked into
+  // the static HTML using the build-time (localhost) origin.
+  const normalized = path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path;
+  if (PUBLIC_EXACT.has(normalized)) return true;
   for (const p of DEV_PREFIXES) if (path.startsWith(p)) return true;
   return false;
 }

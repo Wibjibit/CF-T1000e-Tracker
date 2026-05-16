@@ -1,6 +1,7 @@
 ---
-// Static login page; the POST goes to /api/auth/verify.
-export const prerender = true;
+// SSR (not prerendered) so error messages and return_to from URL params are
+// reflected in the rendered HTML. Middleware allows /login through.
+export const prerender = false;
 
 const errorParam = Astro.url.searchParams.get('error');
 const errorMessage = errorParam === 'invalid'
