@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { base64ToBytes, decodeUplink } from '../../lib/decoder';
+import { readForwarderConfig, appendForwardLog } from '../../lib/settings';
 
 export const prerender = false;
 
@@ -59,7 +60,59 @@ function parseBasicAuth(header: string | null): { user: string; pass: string } |
   }
 }
 
-export const POST: APIRoute = async ({ request }) => {
+// Per-forward wall-clock cap. Workers free wall budget is ~30 s including
+// waitUntil work; TTN Mapper's v3 endpoint occasionally hangs, so bound it.
+const FORWARD_TIMEOUT_MS = 25_000;
+
+/**
+ * Fire-and-forget POST to the configured forwarder. Records every attempt
+ * (success or failure) to forward_log. Must never throw — the ingest path
+ * already returned 200 by the time we run.
+ */
+async function forwardToTtnMapper(
+  url: string,
+  body: string,
+  fCnt: number,
+): Promise<void> {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FORWARD_TIMEOUT_MS);
+  let status = 0;
+  let error: string | null = null;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      signal: controller.signal,
+    });
+    status = res.status;
+    if (!res.ok) {
+      // Capture a snippet of the response body for diagnostics.
+      const text = await res.text().catch(() => '');
+      error = text ? text.slice(0, 240) : `HTTP ${res.status}`;
+    }
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  try {
+    await appendForwardLog(env.DB, {
+      ts: started,
+      f_cnt: fCnt,
+      target_url: url,
+      status,
+      duration_ms: Date.now() - started,
+      error,
+    });
+  } catch {
+    // Logging failures shouldn't crash anything; swallow.
+  }
+}
+
+export const POST: APIRoute = async ({ request, locals }) => {
   // 1. Basic auth.
   const creds = parseBasicAuth(request.headers.get('Authorization'));
   if (
@@ -158,10 +211,25 @@ export const POST: APIRoute = async ({ request }) => {
     )
     .run();
 
+  const inserted = insert.meta.changes > 0;
+
+  // 8. Optional fan-out to TTN Mapper (or any configured forwarder). Only on
+  // first insert — replays would double-feed downstream. Detached via
+  // waitUntil so a slow TTN Mapper can never time us out from TTN's side.
+  if (inserted) {
+    const forwarder = await readForwarderConfig(env.DB);
+    if (forwarder.enabled && forwarder.url) {
+      const forwardBody = JSON.stringify(body);
+      locals.cfContext.waitUntil(
+        forwardToTtnMapper(forwarder.url, forwardBody, fCnt),
+      );
+    }
+  }
+
   return new Response(
     JSON.stringify({
       ok: true,
-      inserted: insert.meta.changes > 0,
+      inserted,
       f_cnt: fCnt,
       warnings: result.warnings,
     }),

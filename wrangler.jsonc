@@ -20,6 +20,12 @@
     "enabled": true
   },
 
+  // Custom domain. Requires wibjibit.com to be a zone on this account.
+  // Cloudflare auto-provisions the TLS certificate after the first deploy.
+  "routes": [
+    { "pattern": "tracker.wibjibit.com", "custom_domain": true }
+  ],
+
   "d1_databases": [
     {
       "binding": "DB",

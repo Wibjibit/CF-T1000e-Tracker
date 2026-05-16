@@ -1,0 +1,164 @@
+---
+import { env } from 'cloudflare:workers';
+import {
+  readForwarderConfig,
+  writeForwarderConfig,
+  recentForwardLog,
+} from '../lib/settings';
+import { formatAgo } from '../lib/format';
+
+export const prerender = false;
+
+let saved = false;
+let saveError: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  try {
+    const form = await Astro.request.formData();
+    const enabled = form.get('ttnmapper_enabled') === 'on';
+    const url = (form.get('ttnmapper_url') ?? '').toString().trim();
+    if (enabled && !/^https?:\/\//i.test(url)) {
+      saveError = 'URL must start with http:// or https:// when forwarding is enabled.';
+    } else {
+      await writeForwarderConfig(env.DB, { enabled, url });
+      saved = true;
+    }
+  } catch (e) {
+    saveError = e instanceof Error ? e.message : String(e);
+  }
+}
+
+const config = await readForwarderConfig(env.DB);
+const logs = await recentForwardLog(env.DB, 50);
+
+function statusBadge(status: number): { text: string; cls: string } {
+  if (status === 0) return { text: 'err', cls: 'bad' };
+  if (status >= 200 && status < 300) return { text: String(status), cls: 'ok' };
+  if (status >= 300 && status < 400) return { text: String(status), cls: 'warn' };
+  return { text: String(status), cls: 'bad' };
+}
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Settings &mdash; T1000-E Tracker</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, sans-serif; max-width: 56rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+      header { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+      header h1 { margin: 0; font-size: 1.4rem; }
+      header a { color: inherit; opacity: 0.65; text-decoration: none; font-size: 0.92rem; }
+      header a:hover { opacity: 1; }
+
+      section.card {
+        border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+        border-radius: 0.5rem; padding: 1rem 1.25rem; margin-bottom: 1.5rem;
+      }
+      section.card h2 { font-size: 0.95rem; margin: 0 0 0.7rem; font-weight: 600; }
+
+      form .row { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.9rem; }
+      form label { font-size: 0.85rem; opacity: 0.75; }
+      form input[type="text"], form input[type="url"] {
+        font: inherit; padding: 0.45em 0.6em; border-radius: 0.35em;
+        border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+        background: transparent; color: inherit; min-width: 0;
+      }
+      form .check { display: flex; align-items: center; gap: 0.5em; }
+      form button {
+        font: inherit; padding: 0.5em 1em; border-radius: 0.35em; border: 0; cursor: pointer;
+        background: color-mix(in srgb, currentColor 18%, transparent); color: inherit;
+      }
+      form button:hover { background: color-mix(in srgb, currentColor 28%, transparent); }
+
+      .toast { padding: 0.5em 0.8em; border-radius: 0.35em; margin-bottom: 1rem; font-size: 0.9rem; }
+      .toast.ok  { background: color-mix(in srgb, green  20%, transparent); }
+      .toast.bad { background: color-mix(in srgb, #c33   18%, transparent); color: #c33; }
+
+      table { width: 100%; border-collapse: collapse; font-size: 0.88rem; font-variant-numeric: tabular-nums; }
+      th, td { text-align: left; padding: 0.35em 0.55em; border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent); vertical-align: top; }
+      th { font-weight: 500; opacity: 0.65; }
+      td.err { color: #c33; max-width: 28ch; word-break: break-word; }
+
+      .badge { display: inline-block; padding: 0.05em 0.5em; border-radius: 0.3em; font-size: 0.78em; font-weight: 600; }
+      .badge.ok   { background: color-mix(in srgb, green  35%, transparent); }
+      .badge.warn { background: color-mix(in srgb, orange 35%, transparent); }
+      .badge.bad  { background: color-mix(in srgb, #c33   35%, transparent); color: #fff; }
+
+      .empty { padding: 1.5rem; text-align: center; opacity: 0.55; font-size: 0.95rem; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Settings</h1>
+      <a href="/">&larr; home</a>
+      <a href="/map">map</a>
+      <a href="/timeline">timeline</a>
+      <a href="/api/auth/logout" style="margin-left: auto">sign out</a>
+    </header>
+
+    {saved && <div class="toast ok">Saved.</div>}
+    {saveError && <div class="toast bad">Could not save: {saveError}</div>}
+
+    <section class="card">
+      <h2>TTN Mapper forwarder</h2>
+      <p style="margin-top: 0; opacity: 0.7; font-size: 0.92rem;">
+        Re-POST each successful uplink to a downstream service (e.g. TTN Mapper).
+        Runs in the background via <code>waitUntil</code> so it can&rsquo;t delay
+        the response to TTN.
+      </p>
+      <form method="POST">
+        <div class="row check">
+          <input type="checkbox" id="ttnmapper_enabled" name="ttnmapper_enabled" checked={config.enabled} />
+          <label for="ttnmapper_enabled">Enable forwarding</label>
+        </div>
+        <div class="row">
+          <label for="ttnmapper_url">Target URL</label>
+          <input
+            type="url"
+            id="ttnmapper_url"
+            name="ttnmapper_url"
+            value={config.url}
+            placeholder="https://integrations.ttnmapper.org/tts/v3/uplink-message"
+          />
+        </div>
+        <button type="submit">Save</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Recent forwards ({logs.length})</h2>
+      {logs.length === 0 ? (
+        <div class="empty">No forward attempts logged yet.</div>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>f_cnt</th>
+              <th>Status</th>
+              <th>Took</th>
+              <th>Target</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody>
+            {logs.map((row) => {
+              const badge = statusBadge(row.status);
+              return (
+                <tr>
+                  <td>{formatAgo(row.ts)}</td>
+                  <td>{row.f_cnt}</td>
+                  <td><span class={`badge ${badge.cls}`}>{badge.text}</span></td>
+                  <td>{row.duration_ms} ms</td>
+                  <td style="opacity: 0.7; word-break: break-all; max-width: 18ch;">{row.target_url}</td>
+                  <td class="err">{row.error ?? ''}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </section>
+  </body>
+</html>
