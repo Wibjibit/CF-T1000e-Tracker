@@ -140,7 +140,14 @@ export const prerender = false;
         const select = document.getElementById('range-select');
         const VALID_RANGES = ['1h', '6h', '24h', '7d', '30d', 'all'];
         const AUTO_REFRESH_MS = 5 * 60 * 1000;
-        const AUTO_REFRESH_KEY = 'tracker.map.autoRefresh';
+        const AUTO_REFRESH_KEY = 'tracker.autoRefresh';
+        // One-time migration from the old map-scoped key so existing users
+        // keep their preference when the timeline page started sharing it.
+        const legacy = localStorage.getItem('tracker.map.autoRefresh');
+        if (legacy !== null && localStorage.getItem(AUTO_REFRESH_KEY) === null) {
+          localStorage.setItem(AUTO_REFRESH_KEY, legacy);
+          localStorage.removeItem('tracker.map.autoRefresh');
+        }
 
         let refreshTimer = null;
         function currentRange() {
