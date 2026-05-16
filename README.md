@@ -8,12 +8,29 @@ Designed to run entirely on Cloudflare's free tier (Workers, D1, Static Assets).
 
 | Phase | Scope | State |
 |---|---|---|
-| 1 | Repo + Astro/Cloudflare scaffold | **in progress** |
-| 2 | D1 schema + TTN ingest endpoint | pending |
-| 3 | Read API + map page | pending |
-| 4 | TOTP auth | pending |
-| 5 | Timeline / sensor charts | pending |
-| 6 | Production deploy | pending |
+| 1 | Repo + Astro/Cloudflare scaffold | done |
+| 2 | D1 schema + TTN ingest endpoint | done |
+| 3 | Read API + map page | done |
+| 4 | TOTP auth | done |
+| 5 | Timeline / sensor charts | done |
+| 6 | Production deploy (tracker.wibjibit.com) | done |
+| 6.1 | TTN Mapper forwarder (settings + audit log) | done (blocked by upstream) |
+
+## Future work
+
+- **`/coverage` page** &mdash; heatmap + reception "beams" overlaid on OSM. The
+  data is already in D1: every uplink has `lat`, `lon`, `rssi`, `snr`, and
+  `gateway_id`. A heatmap layer (e.g. Leaflet.heat) coloured by RSSI shows
+  where each gateway hears the device; line segments from the device fix to
+  the gateway position would visualise the receive path. Gateway coordinates
+  aren't currently stored &mdash; either look them up from the TTN gateway API
+  on demand, cache in a `gateways(id, lat, lon)` table, or accept a manual
+  entry in `/settings`.
+- **NTC temperature calibration** &mdash; firmware reads ~10&nbsp;&deg;C cold. See
+  notes in `docs/payload.md` / parent project HANDOFF.md.
+- **Self-host a TTN Mapper successor** if/when JP Meijers winds down the
+  service. The forwarder is already generic (target URL + headers in D1);
+  pointing at a replacement is a `/settings` edit, not code.
 
 ## Architecture
 
