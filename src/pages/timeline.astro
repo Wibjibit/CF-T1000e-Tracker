@@ -51,8 +51,8 @@ export const prerender = false;
         display: flex; justify-content: space-between; align-items: baseline;
       }
       .chart-card .latest { font-variant-numeric: tabular-nums; font-weight: 600; color: inherit; }
-      .chart-card .chart { height: 130px; }
-      .motion-card .chart { height: 60px; }
+      .chart-card .chart { height: 160px; }
+      .motion-card .chart { height: 70px; }
       .empty { padding: 2rem; text-align: center; opacity: 0.6; font-size: 0.95rem; }
     </style>
   </head>
@@ -95,6 +95,14 @@ export const prerender = false;
         const uPlot = window.uPlot;
         const statusEl = document.getElementById('status');
         const setStatus = (m) => { if (statusEl) statusEl.textContent = m; };
+
+        // uPlot draws axes on <canvas>; the 'currentColor' CSS keyword doesn't
+        // resolve inside canvas fillStyle so axis text would render as the
+        // canvas default (near-black) and disappear on dark themes. Read the
+        // body computed colour and pass it explicitly. Re-evaluated on each
+        // chart build so OS theme switches are picked up on the next reload.
+        const axisColor = getComputedStyle(document.body).color || '#888';
+        const gridColor = 'rgba(127,127,127,0.18)';
 
         // One uPlot per chart. Stored so we can destroy + recreate on range change.
         const charts = {};
@@ -142,6 +150,20 @@ export const prerender = false;
           }
           const series = [{}, seriesOpts];
           const range = autoRange(ys, opts);
+          // Force ~5 evenly spaced y-axis ticks. uPlot's default picker leans
+          // minimalist for short charts (1-2 ticks); we want enough gridlines
+          // that the eye can interpolate values without guessing. Charts can
+          // override with a hand-picked splits array for integer-valued data.
+          const tickCount = opts.tickCount || 5;
+          const fixedSplits = opts.splits;
+          const ySplits = fixedSplits
+            ? () => fixedSplits
+            : (_, axisIdx, scaleMin, scaleMax) => {
+                const out = [];
+                const step = (scaleMax - scaleMin) / (tickCount - 1);
+                for (let i = 0; i < tickCount; i++) out.push(scaleMin + i * step);
+                return out;
+              };
           // y-axis tick formatter: append unit so each gridline is self-describing.
           const yValues = (_, splits) => splits.map((v) => {
             if (v == null || !Number.isFinite(v)) return '';
@@ -152,8 +174,14 @@ export const prerender = false;
             width, height, series,
             scales: { y: { range: () => range } },
             axes: [
-              { stroke: 'currentColor', grid: { stroke: 'rgba(127,127,127,0.15)' } },
-              { stroke: 'currentColor', grid: { stroke: 'rgba(127,127,127,0.15)' }, size: 60, values: yValues },
+              { stroke: axisColor, grid: { stroke: gridColor } },
+              {
+                stroke: axisColor,
+                grid: { stroke: gridColor },
+                size: 60,
+                splits: ySplits,
+                values: yValues,
+              },
             ],
             legend: { show: false },
             cursor: { y: false },
@@ -181,8 +209,8 @@ export const prerender = false;
             ],
             scales: { y: { range: () => [0, 1.1] } },
             axes: [
-              { stroke: 'currentColor', grid: { stroke: 'rgba(127,127,127,0.15)' } },
-              { stroke: 'currentColor', grid: { stroke: 'rgba(127,127,127,0.15)' }, size: 50, values: (_, splits) => splits.map((v) => v === 0 ? '' : v === 1 ? '✓' : '') },
+              { stroke: axisColor, grid: { stroke: gridColor } },
+              { stroke: axisColor, grid: { stroke: gridColor }, size: 50, values: (_, splits) => splits.map((v) => v === 0 ? '' : v === 1 ? '✓' : '') },
             ],
             legend: { show: false },
             cursor: { y: false },
@@ -230,8 +258,8 @@ export const prerender = false;
           charts.lux       = makeChart('chart-lux',        xs, luxPct,     { label: 'light %',   color: '#d4a017', min: 0, max: 100, unit: '%',     decimals: 0, fmt: (v) => v.toFixed(0) + '%' });
           charts.rssi      = makeChart('chart-rssi',       xs, rssi,       { label: 'dBm',       color: '#1d68d0',                  unit: ' dBm',  decimals: 0, fmt: (v) => v.toFixed(0) + ' dBm' });
           charts.snr       = makeChart('chart-snr',        xs, snr,        { label: 'dB',        color: '#8a44d3',                  unit: ' dB',   decimals: 1, fmt: (v) => v.toFixed(1) + ' dB' });
-          // SF is integer-valued (7..12); step plotting + integer-only ticks.
-          charts.sf        = makeChart('chart-sf',         xs, sf,         { label: 'SF',        color: '#0d7c7c', min: 6.5, max: 12.5, unit: '', decimals: 0, step: true, fmt: (v) => 'SF' + Math.round(v) });
+          // SF is integer-valued (7..12); step plotting + integer-only ticks at exactly SF7..SF12.
+          charts.sf        = makeChart('chart-sf',         xs, sf,         { label: 'SF', color: '#0d7c7c', min: 6.5, max: 12.5, unit: '', decimals: 0, step: true, splits: [7, 8, 9, 10, 11, 12], fmt: (v) => 'SF' + Math.round(v) });
           charts.motion    = makeMotionChart(xs, motion);
 
           // Latest values in the card headers.
