@@ -1,7 +1,17 @@
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { base64ToBytes, decodeUplink } from '../../lib/decoder';
-import { readForwarderConfig, appendForwardLog } from '../../lib/settings';
+import {
+  readForwarderConfig,
+  appendForwardLog,
+  readTtnApiConfig,
+} from '../../lib/settings';
+import {
+  upsertGatewaySighting,
+  readGatewayRow,
+  refreshGateway,
+  isStale,
+} from '../../lib/gateways';
 
 export const prerender = false;
 
@@ -144,6 +154,38 @@ async function forwardToTtnMapper(
   }
 }
 
+/**
+ * Background work fired from waitUntil: ensure every gateway_id heard in
+ * this uplink has a cache row (sighting upsert), then refresh from the TTN
+ * gateway API any row that's new or older than the staleness threshold.
+ *
+ * Falls back to the uplink's cluster_address as host if /settings has no
+ * override and the user hasn't set the default — useful for users whose
+ * cluster is different from eu1.
+ */
+async function refreshGatewaysAfterUplink(
+  gatewayIds: string[],
+  clusterAddress: string | undefined,
+): Promise<void> {
+  try {
+    const now = Date.now();
+    for (const id of gatewayIds) {
+      await upsertGatewaySighting(env.DB, id, now);
+    }
+    const config = await readTtnApiConfig(env.DB);
+    if (!config.apiKey) return; // skip refresh entirely with no key
+    const host = config.host || clusterAddress || 'eu1.cloud.thethings.network';
+    for (const id of gatewayIds) {
+      const row = await readGatewayRow(env.DB, id);
+      if (!row) continue;
+      if (!isStale(row, now)) continue;
+      await refreshGateway(env.DB, host, config.apiKey, id);
+    }
+  } catch {
+    // Background work; swallow rather than failing the (already-200) request.
+  }
+}
+
 export const POST: APIRoute = async ({ request, locals }) => {
   // 1. Basic auth.
   const creds = parseBasicAuth(request.headers.get('Authorization'));
@@ -266,6 +308,24 @@ export const POST: APIRoute = async ({ request, locals }) => {
           forwarder.email,
           forwarder.experiment,
           ttsDomain,
+        ),
+      );
+    }
+
+    // 9. Gateway sightings + lazy lookup. Every gateway_id in rx_metadata
+    // gets a row (status='never_refreshed' if new). For new or stale rows
+    // (>7d since last refresh), queue a TTN gateway-API fetch via waitUntil.
+    // Skips entirely if no API key is configured — sightings still upsert.
+    const seenGatewayIds = new Set<string>();
+    for (const rx of rxs) {
+      const id = rx?.gateway_ids?.gateway_id;
+      if (id) seenGatewayIds.add(id);
+    }
+    if (seenGatewayIds.size > 0) {
+      locals.cfContext.waitUntil(
+        refreshGatewaysAfterUplink(
+          Array.from(seenGatewayIds),
+          body.uplink_message?.network_ids?.cluster_address,
         ),
       );
     }

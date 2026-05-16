@@ -97,10 +97,14 @@ Once the Worker is reachable, point your TTN application at it:
 | `/` | session cookie | SSR landing — mini map + latest position + sensor card |
 | `/map` | session cookie | Leaflet + OSM, polyline by range, auto-refresh checkbox |
 | `/timeline` | session cookie | uPlot charts for every captured field, range dropdown, auto-refresh |
-| `/settings` | session cookie | Forwarder config + audit log |
+| `/beams` | session cookie | Leaflet, gateway-to-device beams colored by RSSI/SNR, range selector |
+| `/gateways` | session cookie | Sortable management table — aggregates, sanity badges, manual location override, hide-from-beams |
+| `/settings` | session cookie | Forwarder + TTN gateway-API config, audit log |
 | `/login` | none | TOTP form |
 | `/api/ingest` | TTN Basic auth | POST endpoint for the TTN webhook |
 | `/api/points` | session cookie | GET, `?range=1h\|6h\|24h\|7d\|30d\|all&with_fix=1` |
+| `/api/beams` | session cookie | GET, `?range=…` — one row per (uplink × gateway) for /beams |
+| `/api/gateways` | session cookie | GET = list w/ aggregates. POST = `{action: refresh\|refresh_all\|set_manual_location\|clear_manual_location\|hide\|unhide, gateway_id?, latitude?, longitude?, altitude?}` |
 | `/api/auth/verify` | rate-limited | POST 6-digit code, returns session cookie |
 | `/api/auth/logout` | session cookie | Clears cookie |
 
@@ -112,3 +116,6 @@ See `migrations/`:
 - `0003_settings_and_forward_log.sql` — generic K/V settings + outbound forward audit log
 - `0004_ttnmapper_headers.sql` — TTN Mapper email + experiment header keys
 - `0005_spreading_factor.sql` — capture SF per uplink
+- `0006_gateways.sql` — gateway metadata cache (TTN-fetched location + manual override + hide flag); seeds `ttn_api_key` / `ttn_ns_host` settings keys
+
+After applying `0006_gateways.sql`, paste a TTN API key with `view-gateway-info` rights into `/settings` to enable gateway lookups. Without it, `/beams` and `/gateways` still work but show only gateway IDs and aggregated radio stats — no names or coordinates, so no beam lines drawn.

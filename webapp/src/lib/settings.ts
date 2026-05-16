@@ -9,6 +9,10 @@ export const FORWARDER_URL_KEY = 'ttnmapper_url';
 export const FORWARDER_EMAIL_KEY = 'ttnmapper_email';
 export const FORWARDER_EXPERIMENT_KEY = 'ttnmapper_experiment';
 
+export const TTN_API_KEY_KEY = 'ttn_api_key';
+export const TTN_NS_HOST_KEY = 'ttn_ns_host';
+export const TTN_NS_HOST_DEFAULT = 'eu1.cloud.thethings.network';
+
 export interface ForwarderConfig {
   enabled: boolean;
   url: string;
@@ -16,6 +20,13 @@ export interface ForwarderConfig {
   email: string;
   /** Sent as TTNMAPPERORG-EXPERIMENT header when non-empty. */
   experiment: string;
+}
+
+export interface TtnApiConfig {
+  /** Bearer token with RIGHT_GATEWAY_INFO. Empty string means "no gateway lookups". */
+  apiKey: string;
+  /** Network server host, e.g. eu1.cloud.thethings.network. */
+  host: string;
 }
 
 interface SettingRow { value: string; }
@@ -62,6 +73,25 @@ export async function writeForwarderConfig(
   await writeSetting(db, FORWARDER_URL_KEY, config.url);
   await writeSetting(db, FORWARDER_EMAIL_KEY, config.email);
   await writeSetting(db, FORWARDER_EXPERIMENT_KEY, config.experiment);
+}
+
+export async function readTtnApiConfig(db: D1Database): Promise<TtnApiConfig> {
+  const [apiKey, host] = await Promise.all([
+    readSetting(db, TTN_API_KEY_KEY),
+    readSetting(db, TTN_NS_HOST_KEY),
+  ]);
+  return {
+    apiKey: apiKey ?? '',
+    host: host && host.trim() ? host.trim() : TTN_NS_HOST_DEFAULT,
+  };
+}
+
+export async function writeTtnApiConfig(
+  db: D1Database,
+  config: TtnApiConfig,
+): Promise<void> {
+  await writeSetting(db, TTN_API_KEY_KEY, config.apiKey);
+  await writeSetting(db, TTN_NS_HOST_KEY, config.host || TTN_NS_HOST_DEFAULT);
 }
 
 export interface ForwardLogRow {

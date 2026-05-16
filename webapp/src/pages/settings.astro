@@ -4,6 +4,9 @@ import {
   readForwarderConfig,
   writeForwarderConfig,
   recentForwardLog,
+  readTtnApiConfig,
+  writeTtnApiConfig,
+  TTN_NS_HOST_DEFAULT,
 } from '../lib/settings';
 import { formatAgo } from '../lib/format';
 
@@ -11,22 +14,34 @@ export const prerender = false;
 
 let saved = false;
 let saveError: string | null = null;
+let savedSection: 'forwarder' | 'ttn_api' | null = null;
 
 if (Astro.request.method === 'POST') {
   try {
     const form = await Astro.request.formData();
-    const enabled = form.get('ttnmapper_enabled') === 'on';
-    const url = (form.get('ttnmapper_url') ?? '').toString().trim();
-    const email = (form.get('ttnmapper_email') ?? '').toString().trim();
-    const experiment = (form.get('ttnmapper_experiment') ?? '').toString().trim();
-
-    if (enabled && !/^https?:\/\//i.test(url)) {
-      saveError = 'URL must start with http:// or https:// when forwarding is enabled.';
-    } else if (enabled && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-      saveError = 'Email address is required when forwarding is enabled (TTN Mapper rejects requests without TTNMAPPERORG-USER).';
-    } else {
-      await writeForwarderConfig(env.DB, { enabled, url, email, experiment });
+    const section = (form.get('section') ?? '').toString();
+    if (section === 'ttn_api') {
+      const apiKey = (form.get('ttn_api_key') ?? '').toString().trim();
+      const host = (form.get('ttn_ns_host') ?? '').toString().trim() || TTN_NS_HOST_DEFAULT;
+      await writeTtnApiConfig(env.DB, { apiKey, host });
       saved = true;
+      savedSection = 'ttn_api';
+    } else {
+      // Default / 'forwarder' section.
+      const enabled = form.get('ttnmapper_enabled') === 'on';
+      const url = (form.get('ttnmapper_url') ?? '').toString().trim();
+      const email = (form.get('ttnmapper_email') ?? '').toString().trim();
+      const experiment = (form.get('ttnmapper_experiment') ?? '').toString().trim();
+
+      if (enabled && !/^https?:\/\//i.test(url)) {
+        saveError = 'URL must start with http:// or https:// when forwarding is enabled.';
+      } else if (enabled && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+        saveError = 'Email address is required when forwarding is enabled (TTN Mapper rejects requests without TTNMAPPERORG-USER).';
+      } else {
+        await writeForwarderConfig(env.DB, { enabled, url, email, experiment });
+        saved = true;
+        savedSection = 'forwarder';
+      }
     }
   } catch (e) {
     saveError = e instanceof Error ? e.message : String(e);
@@ -34,6 +49,7 @@ if (Astro.request.method === 'POST') {
 }
 
 const config = await readForwarderConfig(env.DB);
+const ttnApi = await readTtnApiConfig(env.DB);
 const logs = await recentForwardLog(env.DB, 50);
 
 function statusBadge(status: number): { text: string; cls: string } {
@@ -99,11 +115,54 @@ function statusBadge(status: number): { text: string; cls: string } {
       <a href="/">&larr; home</a>
       <a href="/map">map</a>
       <a href="/timeline">timeline</a>
+      <a href="/beams">beams</a>
+      <a href="/gateways">gateways</a>
       <a href="/api/auth/logout" style="margin-left: auto">sign out</a>
     </header>
 
-    {saved && <div class="toast ok">Saved.</div>}
+    {saved && <div class="toast ok">Saved{savedSection === 'ttn_api' ? ' TTN API config' : savedSection === 'forwarder' ? ' forwarder config' : ''}.</div>}
     {saveError && <div class="toast bad">Could not save: {saveError}</div>}
+
+    <section class="card">
+      <h2>TTN gateway API</h2>
+      <p style="margin-top: 0; opacity: 0.7; font-size: 0.92rem;">
+        Used to fetch gateway names and locations for the <a href="/beams">/beams</a> view
+        and <a href="/gateways">/gateways</a> table. Create an API key in the
+        TTN Console (your application &rarr; API keys, or organization-level) with
+        the <code>view-gateway-info</code> grant. Without a key, only gateway IDs
+        from <code>rx_metadata</code> are visible &mdash; no names, no beams.
+      </p>
+      <form method="POST">
+        <input type="hidden" name="section" value="ttn_api" />
+        <div class="row">
+          <label for="ttn_api_key">API key (Bearer token)</label>
+          <input
+            type="password"
+            id="ttn_api_key"
+            name="ttn_api_key"
+            value={ttnApi.apiKey}
+            autocomplete="off"
+            placeholder="NNSXS.…"
+          />
+        </div>
+        <div class="row">
+          <label for="ttn_ns_host">Network server host</label>
+          <input
+            type="text"
+            id="ttn_ns_host"
+            name="ttn_ns_host"
+            value={ttnApi.host}
+            placeholder={TTN_NS_HOST_DEFAULT}
+          />
+        </div>
+        <button type="submit">Save</button>
+        {ttnApi.apiKey && (
+          <span style="margin-left: 0.7em; font-size: 0.85rem; opacity: 0.75;">
+            <span class="badge ok">key configured</span>
+          </span>
+        )}
+      </form>
+    </section>
 
     <section class="card">
       <h2>TTN Mapper forwarder</h2>
@@ -113,6 +172,7 @@ function statusBadge(status: number): { text: string; cls: string } {
         the response to TTN.
       </p>
       <form method="POST">
+        <input type="hidden" name="section" value="forwarder" />
         <div class="row check">
           <input type="checkbox" id="ttnmapper_enabled" name="ttnmapper_enabled" checked={config.enabled} />
           <label for="ttnmapper_enabled">Enable forwarding</label>

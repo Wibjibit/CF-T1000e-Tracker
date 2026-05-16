@@ -1,0 +1,482 @@
+---
+// Gateway management table. SSR fetches the initial list (so the page is
+// useful with JS off too); client JS adds sorting, filters, refresh
+// actions, manual-override editing.
+import { env } from 'cloudflare:workers';
+import { listGateways, type GatewayListEntry } from '../lib/gateways';
+import { readTtnApiConfig } from '../lib/settings';
+import { formatAgo } from '../lib/format';
+
+export const prerender = false;
+
+const gateways = await listGateways(env.DB);
+const apiConfig = await readTtnApiConfig(env.DB);
+const hasApiKey = apiConfig.apiKey.length > 0;
+
+// Pre-rendered values for the table — avoids re-doing this in client JS for
+// the initial render. Client-side actions trigger a full re-fetch via fetch.
+function fmtRssi(v: number | null): string {
+  return v == null ? '—' : `${v} dBm`;
+}
+function fmtSnr(v: number | null): string {
+  return v == null ? '—' : `${v.toFixed(1)} dB`;
+}
+function fmtAvg(v: number | null): string {
+  return v == null ? '—' : v.toFixed(1);
+}
+function fmtCoord(lat: number | null, lon: number | null): string {
+  if (lat == null || lon == null) return '—';
+  return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+}
+function statusLabel(status: GatewayListEntry['status']): string {
+  switch (status) {
+    case 'ok': return 'OK';
+    case 'no_location': return 'No location';
+    case 'not_found': return 'Not found';
+    case 'error': return 'Error';
+    case 'never_refreshed': return 'Never refreshed';
+  }
+}
+const BADGE_LABELS: Record<string, { text: string; cls: string }> = {
+  no_location:     { text: 'no location',  cls: 'warn' },
+  null_island:     { text: '(0,0)',        cls: 'bad'  },
+  stale:           { text: 'stale',        cls: 'warn' },
+  wide_rssi_swing: { text: 'wide RSSI',    cls: 'warn' },
+  not_found:      { text: 'not in TTN',   cls: 'bad'  },
+  error:          { text: 'lookup error', cls: 'bad'  },
+  hidden:         { text: 'hidden',       cls: 'info' },
+  manual_override:{ text: 'manual loc',   cls: 'info' },
+  never_refreshed:{ text: 'never refreshed', cls: 'warn' },
+};
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gateways &mdash; T1000-E Tracker</title>
+    <style>
+      :root { color-scheme: light dark; }
+      html, body { margin: 0; padding: 0; font-family: system-ui, sans-serif; line-height: 1.4; }
+      body { max-width: 80rem; margin: 0 auto; padding: 1rem; }
+      header { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+      header h1 { margin: 0; font-size: 1.4rem; }
+      header a { color: inherit; opacity: 0.65; text-decoration: none; font-size: 0.92rem; }
+      header a:hover { opacity: 1; }
+      .spacer { flex: 1; }
+
+      .toolbar {
+        display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;
+        margin-bottom: 0.75rem;
+      }
+      .chip {
+        font: inherit; font-size: 0.85rem;
+        padding: 0.3em 0.8em; border-radius: 999px; cursor: pointer;
+        border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+        background: transparent; color: inherit;
+      }
+      .chip.active {
+        background: color-mix(in srgb, currentColor 18%, transparent);
+        font-weight: 600;
+      }
+      .toolbar .right { margin-left: auto; display: flex; gap: 0.5rem; align-items: center; }
+      .toolbar button.primary {
+        font: inherit; padding: 0.4em 1em; border-radius: 0.35em; border: 0; cursor: pointer;
+        background: color-mix(in srgb, currentColor 18%, transparent); color: inherit;
+      }
+      .toolbar button.primary:hover { background: color-mix(in srgb, currentColor 28%, transparent); }
+      .toolbar button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .toolbar #refresh-status { font-size: 0.85rem; opacity: 0.7; }
+
+      .api-warning {
+        background: color-mix(in srgb, orange 18%, transparent);
+        border: 1px solid color-mix(in srgb, orange 35%, transparent);
+        border-radius: 0.4em; padding: 0.6em 0.9em; margin-bottom: 0.9rem;
+        font-size: 0.9rem;
+      }
+
+      table { width: 100%; border-collapse: collapse; font-size: 0.88rem; font-variant-numeric: tabular-nums; }
+      thead th {
+        text-align: left; padding: 0.45em 0.55em;
+        border-bottom: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+        font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em;
+        opacity: 0.75; cursor: pointer; user-select: none; white-space: nowrap;
+      }
+      thead th .sort-ind { opacity: 0.4; margin-left: 0.2em; }
+      thead th.sorted .sort-ind { opacity: 1; }
+      tbody td {
+        padding: 0.45em 0.55em;
+        border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+        vertical-align: top;
+      }
+      tbody tr { cursor: pointer; }
+      tbody tr:hover { background: color-mix(in srgb, currentColor 6%, transparent); }
+      tbody tr.expanded { background: color-mix(in srgb, currentColor 10%, transparent); }
+      tbody tr.hidden-row td:first-child::before {
+        content: '⊘ '; color: color-mix(in srgb, currentColor 60%, transparent);
+      }
+      .gw-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em; word-break: break-all; }
+      .nowrap { white-space: nowrap; }
+      .muted { opacity: 0.55; }
+
+      .badges { display: inline-flex; gap: 0.25em; flex-wrap: wrap; }
+      .badge {
+        display: inline-block; padding: 0.05em 0.5em; border-radius: 0.3em;
+        font-size: 0.72em; font-weight: 600; white-space: nowrap;
+      }
+      .badge.ok   { background: color-mix(in srgb, green  35%, transparent); color: #fff; }
+      .badge.warn { background: color-mix(in srgb, orange 35%, transparent); }
+      .badge.bad  { background: color-mix(in srgb, #c33   35%, transparent); color: #fff; }
+      .badge.info { background: color-mix(in srgb, #06c   25%, transparent); }
+
+      .detail {
+        background: color-mix(in srgb, currentColor 4%, transparent);
+        border-left: 3px solid color-mix(in srgb, currentColor 22%, transparent);
+        padding: 1rem 1.25rem; font-size: 0.92rem;
+      }
+      .detail .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
+      .detail .actions button {
+        font: inherit; padding: 0.35em 0.9em; border-radius: 0.35em; border: 0; cursor: pointer;
+        background: color-mix(in srgb, currentColor 18%, transparent); color: inherit;
+      }
+      .detail .actions button.danger {
+        background: color-mix(in srgb, #c33 30%, transparent); color: #fff;
+      }
+      .detail form { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: flex-end; margin-bottom: 0.9rem; }
+      .detail form .row { display: flex; flex-direction: column; gap: 0.25rem; }
+      .detail form label { font-size: 0.78rem; opacity: 0.7; }
+      .detail form input {
+        font: inherit; padding: 0.35em 0.55em; border-radius: 0.3em; width: 9rem;
+        border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+        background: transparent; color: inherit;
+      }
+      .detail pre {
+        margin: 0; max-height: 12rem; overflow: auto; font-size: 0.78rem;
+        background: color-mix(in srgb, currentColor 8%, transparent);
+        padding: 0.55em 0.7em; border-radius: 0.3em;
+        white-space: pre-wrap; word-break: break-all;
+      }
+      .empty { padding: 2rem; text-align: center; opacity: 0.55; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Gateways</h1>
+      <a href="/">&larr; home</a>
+      <a href="/map">map</a>
+      <a href="/timeline">timeline</a>
+      <a href="/beams">beams</a>
+      <a href="/settings">settings</a>
+      <span class="spacer"></span>
+      <a href="/api/auth/logout">sign out</a>
+    </header>
+
+    {!hasApiKey && (
+      <div class="api-warning">
+        No TTN API key configured. Gateway lookups are disabled, so the table
+        only shows gateways heard in <code>rx_metadata</code> without any
+        location, name, or description.
+        <a href="/settings"> Add a key in /settings &rarr;</a>
+      </div>
+    )}
+
+    <div class="toolbar">
+      <button class="chip active" data-filter="all">All ({gateways.length})</button>
+      <button class="chip" data-filter="located">Located ({gateways.filter(g => g.beam_eligible).length})</button>
+      <button class="chip" data-filter="unlocated">Unlocated ({gateways.filter(g => !g.beam_eligible && !g.hidden).length})</button>
+      <button class="chip" data-filter="active24h">Active 24 h ({gateways.filter(g => g.uplinks_24h > 0).length})</button>
+      <button class="chip" data-filter="active7d">Active 7 d ({gateways.filter(g => g.uplinks_7d > 0).length})</button>
+      <button class="chip" data-filter="hidden">Hidden ({gateways.filter(g => g.hidden === 1).length})</button>
+      <div class="right">
+        <span id="refresh-status"></span>
+        <button class="primary" id="refresh-all" disabled={!hasApiKey} title={hasApiKey ? '' : 'Add a TTN API key in /settings first'}>
+          Refresh all
+        </button>
+      </div>
+    </div>
+
+    {gateways.length === 0 ? (
+      <div class="empty">
+        No gateways heard yet. They'll appear here once the device's next uplink lands.
+      </div>
+    ) : (
+      <table id="gw-table">
+        <thead>
+          <tr>
+            <th data-sort="gateway_id" data-type="text">Gateway <span class="sort-ind">↕</span></th>
+            <th data-sort="name" data-type="text">Name <span class="sort-ind">↕</span></th>
+            <th data-sort="status" data-type="text">Status <span class="sort-ind">↕</span></th>
+            <th data-sort="location" data-type="text">Location <span class="sort-ind">↕</span></th>
+            <th data-sort="last_seen" data-type="num" class="sorted">Last seen <span class="sort-ind">↓</span></th>
+            <th data-sort="uplinks_total" data-type="num">Uplinks (24 h / 7 d / total) <span class="sort-ind">↕</span></th>
+            <th data-sort="best_rssi" data-type="num">RSSI best / avg <span class="sort-ind">↕</span></th>
+            <th data-sort="best_snr" data-type="num">SNR best / avg <span class="sort-ind">↕</span></th>
+            <th data-sort="badges" data-type="text">Notes <span class="sort-ind">↕</span></th>
+          </tr>
+        </thead>
+        <tbody id="gw-tbody">
+          {gateways.map((g) => (
+            <>
+              <tr
+                class={g.hidden === 1 ? 'gw-row hidden-row' : 'gw-row'}
+                data-gw={g.gateway_id}
+                data-status={g.status}
+                data-hidden={g.hidden}
+                data-located={g.beam_eligible ? '1' : '0'}
+                data-active24h={g.uplinks_24h > 0 ? '1' : '0'}
+                data-active7d={g.uplinks_7d > 0 ? '1' : '0'}
+                data-last-seen={g.last_seen ?? ''}
+                data-uplinks-total={g.uplinks_total}
+                data-best-rssi={g.best_rssi ?? ''}
+                data-best-snr={g.best_snr ?? ''}
+                data-badges={g.badges.join(' ')}
+              >
+                <td class="gw-id">{g.gateway_id}</td>
+                <td>{g.name ?? <span class="muted">—</span>}</td>
+                <td>
+                  <span class={`badge ${g.status === 'ok' ? 'ok' : (g.status === 'error' || g.status === 'not_found' ? 'bad' : 'warn')}`}>
+                    {statusLabel(g.status)}
+                  </span>
+                </td>
+                <td class="nowrap">
+                  {fmtCoord(g.effective_latitude, g.effective_longitude)}
+                  {g.latitude_manual !== null && g.longitude_manual !== null && (
+                    <span class="muted"> (manual)</span>
+                  )}
+                </td>
+                <td class="nowrap">
+                  {g.last_seen ? formatAgo(g.last_seen) : <span class="muted">—</span>}
+                </td>
+                <td class="nowrap">
+                  {g.uplinks_24h} / {g.uplinks_7d} / {g.uplinks_total}
+                </td>
+                <td class="nowrap">
+                  {fmtRssi(g.best_rssi)}
+                  <span class="muted"> / {fmtAvg(g.avg_rssi)}</span>
+                </td>
+                <td class="nowrap">
+                  {fmtSnr(g.best_snr)}
+                  <span class="muted"> / {fmtAvg(g.avg_snr)}</span>
+                </td>
+                <td>
+                  <span class="badges">
+                    {g.badges.map((b) => (
+                      <span class={`badge ${BADGE_LABELS[b]?.cls ?? 'info'}`}>{BADGE_LABELS[b]?.text ?? b}</span>
+                    ))}
+                  </span>
+                </td>
+              </tr>
+              <tr class="detail-row" data-detail-for={g.gateway_id} hidden>
+                <td colspan="9" class="detail">
+                  <div class="actions">
+                    <button data-action="refresh" data-gw={g.gateway_id} disabled={!hasApiKey} title={hasApiKey ? '' : 'No TTN API key configured'}>Refresh now</button>
+                    {g.hidden === 1
+                      ? <button data-action="unhide" data-gw={g.gateway_id}>Unhide from /beams</button>
+                      : <button data-action="hide"   data-gw={g.gateway_id}>Hide from /beams</button>
+                    }
+                    <a class="link-button" href={`/beams#all`} style="margin-left: auto; align-self: center; opacity: 0.7;">View on /beams &rarr;</a>
+                  </div>
+
+                  <form data-form-for={g.gateway_id} onsubmit="return false">
+                    <div class="row">
+                      <label>Manual latitude</label>
+                      <input type="number" step="any" name="lat" value={g.latitude_manual ?? ''} placeholder={g.latitude !== null ? String(g.latitude) : 'e.g. 51.5074'} />
+                    </div>
+                    <div class="row">
+                      <label>Manual longitude</label>
+                      <input type="number" step="any" name="lon" value={g.longitude_manual ?? ''} placeholder={g.longitude !== null ? String(g.longitude) : 'e.g. -0.1278'} />
+                    </div>
+                    <div class="row">
+                      <label>Manual altitude (m)</label>
+                      <input type="number" step="any" name="alt" value={g.altitude_manual ?? ''} placeholder={g.altitude !== null ? String(g.altitude) : 'optional'} />
+                    </div>
+                    <button data-action="set_manual_location" data-gw={g.gateway_id}>Save override</button>
+                    {(g.latitude_manual !== null || g.longitude_manual !== null) && (
+                      <button data-action="clear_manual_location" data-gw={g.gateway_id} class="danger">Clear override</button>
+                    )}
+                  </form>
+
+                  <div style="margin-bottom: 0.6em; opacity: 0.7; font-size: 0.85rem;">
+                    {g.description ? <><strong>Description:</strong> {g.description}<br /></> : null}
+                    <strong>Last refreshed:</strong> {g.last_refreshed_at ? formatAgo(g.last_refreshed_at) : 'never'}
+                    {g.status_error && <><br /><strong>Error:</strong> <span style="color: #c33;">{g.status_error}</span></>}
+                  </div>
+
+                  <details>
+                    <summary style="cursor: pointer; opacity: 0.7; font-size: 0.85rem;">Raw TTN response</summary>
+                    <pre>{g.raw_json ?? '(none)'}</pre>
+                  </details>
+                </td>
+              </tr>
+            </>
+          ))}
+        </tbody>
+      </table>
+    )}
+
+    <script is:inline>
+      // @ts-nocheck
+      (() => {
+        const tbody = document.getElementById('gw-tbody');
+        const refreshStatus = document.getElementById('refresh-status');
+        if (!tbody) return;
+
+        // ── Row expand / collapse ───────────────────────────────────────
+        tbody.addEventListener('click', (e) => {
+          const tr = e.target.closest('tr.gw-row');
+          if (!tr) return;
+          // Ignore clicks that came from buttons / inputs / links.
+          if (e.target.closest('button,input,a,form,details,summary')) return;
+          const gw = tr.getAttribute('data-gw');
+          const detail = tbody.querySelector(`tr.detail-row[data-detail-for="${CSS.escape(gw)}"]`);
+          if (!detail) return;
+          const open = !detail.hasAttribute('hidden');
+          detail.toggleAttribute('hidden', open);
+          tr.classList.toggle('expanded', !open);
+        });
+
+        // Auto-expand if URL hash points at a specific gateway.
+        if (location.hash) {
+          const targetGw = decodeURIComponent(location.hash.slice(1));
+          const tr = tbody.querySelector(`tr.gw-row[data-gw="${CSS.escape(targetGw)}"]`);
+          if (tr) {
+            tr.click();
+            tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          }
+        }
+
+        // ── Filter chips ────────────────────────────────────────────────
+        document.querySelectorAll('.chip[data-filter]').forEach((chip) => {
+          chip.addEventListener('click', () => {
+            document.querySelectorAll('.chip[data-filter]').forEach((c) => c.classList.remove('active'));
+            chip.classList.add('active');
+            const f = chip.getAttribute('data-filter');
+            tbody.querySelectorAll('tr.gw-row').forEach((tr) => {
+              let show = true;
+              if (f === 'located')    show = tr.getAttribute('data-located')  === '1';
+              if (f === 'unlocated')  show = tr.getAttribute('data-located')  === '0' && tr.getAttribute('data-hidden') !== '1';
+              if (f === 'active24h')  show = tr.getAttribute('data-active24h') === '1';
+              if (f === 'active7d')   show = tr.getAttribute('data-active7d')  === '1';
+              if (f === 'hidden')     show = tr.getAttribute('data-hidden')   === '1';
+              tr.hidden = !show;
+              // Also hide the corresponding detail row.
+              const gw = tr.getAttribute('data-gw');
+              const dt = tbody.querySelector(`tr.detail-row[data-detail-for="${CSS.escape(gw)}"]`);
+              if (dt && !show) { dt.hidden = true; tr.classList.remove('expanded'); }
+            });
+          });
+        });
+
+        // ── Sorting ─────────────────────────────────────────────────────
+        const sortState = { key: 'last_seen', dir: 'desc' };
+        function sortBy(key, type) {
+          const dir = sortState.key === key && sortState.dir === 'desc' ? 'asc' : 'desc';
+          sortState.key = key; sortState.dir = dir;
+          const rows = Array.from(tbody.querySelectorAll('tr.gw-row'));
+          rows.sort((a, b) => {
+            const va = a.getAttribute(`data-${key.replace(/_/g, '-')}`) ?? '';
+            const vb = b.getAttribute(`data-${key.replace(/_/g, '-')}`) ?? '';
+            let cmp;
+            if (type === 'num') {
+              const na = va === '' ? -Infinity : Number(va);
+              const nb = vb === '' ? -Infinity : Number(vb);
+              cmp = na - nb;
+            } else {
+              cmp = String(va).localeCompare(String(vb));
+            }
+            return dir === 'asc' ? cmp : -cmp;
+          });
+          for (const r of rows) {
+            const gw = r.getAttribute('data-gw');
+            const dt = tbody.querySelector(`tr.detail-row[data-detail-for="${CSS.escape(gw)}"]`);
+            tbody.appendChild(r);
+            if (dt) tbody.appendChild(dt);
+          }
+          document.querySelectorAll('thead th').forEach((th) => {
+            th.classList.remove('sorted');
+            const ind = th.querySelector('.sort-ind');
+            if (ind) ind.textContent = '↕';
+          });
+          const active = document.querySelector(`thead th[data-sort="${key}"]`);
+          if (active) {
+            active.classList.add('sorted');
+            const ind = active.querySelector('.sort-ind');
+            if (ind) ind.textContent = dir === 'asc' ? '↑' : '↓';
+          }
+        }
+        document.querySelectorAll('thead th[data-sort]').forEach((th) => {
+          th.addEventListener('click', () => sortBy(th.getAttribute('data-sort'), th.getAttribute('data-type')));
+        });
+
+        // ── Actions ─────────────────────────────────────────────────────
+        async function doAction(action, payload) {
+          const res = await fetch('/api/gateways', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action, ...payload }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok || !body.ok) {
+            throw new Error(body.error || `HTTP ${res.status}`);
+          }
+          return body;
+        }
+        function reloadAfterMutation() {
+          // Simple approach: full reload preserves the open-row hash so the
+          // user lands back where they were. Cheap at our row count.
+          location.reload();
+        }
+
+        tbody.addEventListener('click', async (e) => {
+          const btn = e.target.closest('button[data-action]');
+          if (!btn) return;
+          e.preventDefault();
+          const action = btn.getAttribute('data-action');
+          const gw = btn.getAttribute('data-gw');
+          btn.disabled = true;
+          try {
+            if (action === 'refresh' || action === 'hide' || action === 'unhide' || action === 'clear_manual_location') {
+              await doAction(action, { gateway_id: gw });
+            } else if (action === 'set_manual_location') {
+              const form = tbody.querySelector(`form[data-form-for="${CSS.escape(gw)}"]`);
+              if (!form) return;
+              const lat = form.lat.value === '' ? null : Number(form.lat.value);
+              const lon = form.lon.value === '' ? null : Number(form.lon.value);
+              const alt = form.alt.value === '' ? null : Number(form.alt.value);
+              if (lat === null && lon === null) {
+                await doAction('clear_manual_location', { gateway_id: gw });
+              } else {
+                await doAction('set_manual_location', { gateway_id: gw, latitude: lat, longitude: lon, altitude: alt });
+              }
+            }
+            // Keep the hash so the row stays expanded after reload.
+            location.hash = '#' + encodeURIComponent(gw);
+            reloadAfterMutation();
+          } catch (err) {
+            alert('Action failed: ' + (err.message || err));
+            btn.disabled = false;
+          }
+        });
+
+        // ── Refresh all ─────────────────────────────────────────────────
+        const refreshAllBtn = document.getElementById('refresh-all');
+        if (refreshAllBtn) {
+          refreshAllBtn.addEventListener('click', async () => {
+            refreshAllBtn.disabled = true;
+            refreshStatus.textContent = 'refreshing…';
+            try {
+              const body = await doAction('refresh_all', {});
+              const results = body.results || [];
+              const ok = results.filter((r) => r.status === 'ok').length;
+              refreshStatus.textContent = `${ok}/${results.length} ok`;
+              setTimeout(reloadAfterMutation, 800);
+            } catch (err) {
+              refreshStatus.textContent = 'error: ' + (err.message || err);
+              refreshAllBtn.disabled = false;
+            }
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>
