@@ -53,7 +53,7 @@ If you're happy running the dashboard against a tracker you've already flashed e
 ### Dashboard (webapp)
 
 ```bash
-git clone https://github.com/<you>/CF-T1000e-Tracker.git
+git clone https://github.com/Wibjibit/CF-T1000e-Tracker.git
 cd CF-T1000e-Tracker/webapp
 
 npm install
