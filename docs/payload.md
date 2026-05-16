@@ -1,6 +1,6 @@
 # Uplink Payload Format (v9)
 
-The tracker firmware sends a 26-byte custom binary payload on FPort 2 every 120 seconds (configurable). All multi-byte fields are big-endian.
+The tracker firmware sends a 26-byte custom binary payload on FPort 2. Period was 120 s through firmware v9 and is **180 s in firmware v10** &mdash; the payload bytes are identical between v9 and v10, only the LoRa link parameters (SF12 lock, slower cadence) differ. All multi-byte fields are big-endian.
 
 | Offset | Size | Field | Type | Notes |
 |---|---|---|---|---|
@@ -26,8 +26,18 @@ When the GPS chip fails to obtain a fix, `latitude` and `longitude` are written 
 
 ## Decoder
 
-A reference decoder is in [`decoder/ttn_decoder.js`](../decoder/ttn_decoder.js). The same code can be pasted into the TTN console as the Uplink payload formatter; the webapp imports it directly so there's a single source of truth for the byte layout.
+A reference decoder is in [`../decoder/ttn_decoder.js`](../decoder/ttn_decoder.js) (paste into the TTN console as the Uplink payload formatter). The webapp has a typed TypeScript port at [`../webapp/src/lib/decoder.ts`](../webapp/src/lib/decoder.ts) used by `/api/ingest`; both files share a `SYNC:` comment so they're updated together when the byte layout changes.
 
 ## DevStatusAns
 
 The firmware also responds to the LoRaWAN MAC layer `DevStatusReq` command with the same battery percentage rescaled to LoRaWAN's 1&ndash;254 range. So `last_battery_percentage` in the TTN application API reflects the real value as well, though that field only updates whenever the network server happens to issue `DevStatusReq` (sporadically &mdash; typically once per session).
+
+## Stored vs transmitted
+
+The webapp's `uplinks` table stores more than the 26 transmitted bytes &mdash; specifically it captures TTN-side metadata that lives outside the payload:
+
+- `rssi`, `snr`, `gateway_id` &mdash; picked from `rx_metadata[]`, choosing the gateway with the highest RSSI
+- `spreading_factor` &mdash; from `uplink_message.settings.data_rate.lora.spreading_factor`
+- `raw_json` &mdash; the full `ApplicationUp` body for re-decoding if the payload format evolves
+
+So when `/timeline` or `/map` plot RSSI / SNR / SF, those are TTN-reported per-uplink values, not part of the device's transmitted payload.
