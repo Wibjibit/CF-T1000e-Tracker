@@ -4,18 +4,25 @@
 #   wrangler secret put TTN_BASIC_AUTH_PASS
 #   wrangler secret put TOTP_SECRET
 #   wrangler secret put COOKIE_SECRET
+#   wrangler secret put EXPECTED_DEV_EUI
 # Or paste them into the Cloudflare dashboard under Workers -> Settings -> Variables.
 
-# TTN webhook Basic auth (configure the matching values in the TTN webhook integration).
+# TTN webhook Basic auth. Set the same username + password on the TTN
+# Console webhook ("Use basic access authentication") so its POST to
+# /api/ingest carries an Authorization: Basic ... header we accept.
 TTN_BASIC_AUTH_USER=ttn
 TTN_BASIC_AUTH_PASS=replace-with-a-long-random-string
 
-# TOTP shared secret (base32). Phase 4 ships a 'npm run totp:init' helper that
-# generates one and prints a QR for Google Authenticator / Authy / 1Password.
+# TOTP shared secret (base32). The `npm run totp:init` helper generates
+# one, prints a QR for Google Authenticator / Authy / 1Password, and can
+# optionally write it straight into this file.
 TOTP_SECRET=
 
-# 32+ byte random hex string used to sign session cookies.
+# 32-byte random hex string used to sign session cookies. `totp:init`
+# generates this too.
 COOKIE_SECRET=
 
-# Device identity. Filter ingest to one DevEUI (uppercase, no separators).
+# Device identity. Ingest will reject uplinks from any other DevEUI.
+# Find yours in the TTN Console under your registered end device.
+# Format: 16 uppercase hex chars, no separators.
 EXPECTED_DEV_EUI=REPLACE_WITH_YOUR_16_HEX_DEVEUI

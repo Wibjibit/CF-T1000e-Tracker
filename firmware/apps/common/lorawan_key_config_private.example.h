@@ -24,8 +24,10 @@
 /* Class. Almost always Class A for battery-powered trackers. */
 #define LORAWAN_CLASS       SMTC_MODEM_CLASS_A
 
-/* 16-hex-char DevEUI (8 bytes). Unique per device, printed on the T1000-E case
- * sticker; also visible in TTN under the registered device. */
+/* 16-hex-char DevEUI (8 bytes). You pick this when registering the end
+ * device in TTN — typical practice is either to derive one from the Seeed
+ * OUI prefix `70B3D5` plus a per-device serial, or accept the random one
+ * TTN suggests. The same value goes into your TTN device registration. */
 #define LORAWAN_DEVICE_EUI  "0000000000000000"
 
 /* 16-hex-char JoinEUI (8 bytes). Zeros is fine for community TTN — match the

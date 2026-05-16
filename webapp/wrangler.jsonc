@@ -1,16 +1,28 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
+
+  // ────────────────────────────────────────────────────────────────────
+  // FORK SETUP — edit these three values before your first `wrangler deploy`:
+  //
+  //   1. account_id     - find via `wrangler whoami` after `wrangler login`,
+  //                       OR in the Cloudflare dashboard URL after /accounts/
+  //   2. database_id    - returned by `wrangler d1 create tracker`. Paste the
+  //                       UUID it prints here, then run
+  //                       `wrangler d1 migrations apply tracker --remote`.
+  //   3. routes[0].pattern - your custom domain on a zone owned by the same
+  //                       account, OR delete the whole `routes` block to
+  //                       deploy on the auto-assigned *.workers.dev URL.
+  // ────────────────────────────────────────────────────────────────────
+
   "name": "cf-t1000e-tracker",
-  // "Pauls Account" — pinned so we can't accidentally deploy to another account
-  // if you ever 'wrangler login' under a different email. Override locally if
-  // you fork this repo onto your own account.
   "account_id": "a3c6a5b41c0312ead688ef0c16313b45",
   "compatibility_date": "2026-05-16",
   "compatibility_flags": ["nodejs_compat"],
 
   // Note: 'main' is intentionally omitted. The @astrojs/cloudflare adapter
   // generates dist/_worker.js/index.js during 'astro build' and writes its
-  // own wrangler config alongside it. Wrangler picks that up at deploy time.
+  // own wrangler config (dist/server/wrangler.json) alongside it. Wrangler
+  // picks that up at deploy time via `--config dist/server/wrangler.json`.
   "assets": {
     "binding": "ASSETS",
     "directory": "./dist"
@@ -20,8 +32,12 @@
     "enabled": true
   },
 
-  // Custom domain. Requires wibjibit.com to be a zone on this account.
-  // Cloudflare auto-provisions the TLS certificate after the first deploy.
+  // Custom domain binding. The zone (e.g. wibjibit.com) must already be on
+  // the same Cloudflare account as this Worker. Cloudflare auto-provisions
+  // the TLS certificate within a minute or two of the first deploy.
+  //
+  // Delete this `routes` block if you don't have a custom domain yet — the
+  // Worker will be reachable on cf-t1000e-tracker.<account>.workers.dev.
   "routes": [
     { "pattern": "tracker.wibjibit.com", "custom_domain": true }
   ],
