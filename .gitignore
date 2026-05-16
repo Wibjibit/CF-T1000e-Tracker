@@ -1,11 +1,30 @@
-node_modules/
-dist/
-.astro/
-.wrangler/
-.dev.vars
-.dev.vars.bak
+# --- shared ---
 *.log
 .DS_Store
 .env
 .env.local
-test/d1-dump.txt
+
+# --- webapp/ artefacts ---
+webapp/node_modules/
+webapp/dist/
+webapp/.astro/
+webapp/.wrangler/
+webapp/.dev.vars
+webapp/.dev.vars.bak
+webapp/test/d1-dump.txt
+
+# --- firmware/ artefacts ---
+# Build outputs from SEGGER Embedded Studio
+firmware/**/Output/
+firmware/**/Output_Release/
+firmware/**/Output_Debug/
+firmware/**/*.bak
+# Credentials live in a sibling header that's per-checkout
+firmware/apps/common/lorawan_key_config_private.h
+# Locally extracted SDK
+firmware/nrf5sdk/
+
+# --- build artefact zips (DFU packages) ---
+# Built from firmware/, distributed via releases not committed
+*.zip
+!firmware/templates/**/*.zip
