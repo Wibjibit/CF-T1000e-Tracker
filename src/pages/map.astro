@@ -1,0 +1,145 @@
+---
+// Static page. All data fetched client-side from /api/points so the map can
+// be re-ranged without an SSR round trip.
+export const prerender = true;
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>T1000-E Tracker &mdash; map</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin="anonymous"
+    />
+    <style>
+      :root { color-scheme: light dark; }
+      html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, sans-serif; }
+      body { display: flex; flex-direction: column; }
+      header { padding: 0.6rem 1rem; display: flex; align-items: center; gap: 1rem; border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent); flex-wrap: wrap; }
+      header h1 { margin: 0; font-size: 1.05rem; }
+      header a { color: inherit; text-decoration: none; opacity: 0.7; }
+      header a:hover { opacity: 1; }
+      .ranges { display: flex; gap: 0.3rem; margin-left: auto; }
+      .ranges button {
+        padding: 0.3em 0.7em; border-radius: 0.3em; border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+        background: transparent; color: inherit; cursor: pointer; font: inherit;
+      }
+      .ranges button[aria-pressed="true"] {
+        background: color-mix(in srgb, currentColor 15%, transparent);
+        border-color: color-mix(in srgb, currentColor 35%, transparent);
+      }
+      #status { font-size: 0.85rem; opacity: 0.7; }
+      #map { flex: 1 1 auto; min-height: 0; }
+      /* Force Leaflet attribution to a readable contrast in dark mode. */
+      .leaflet-control-attribution { background: rgba(255, 255, 255, 0.7) !important; color: #222 !important; }
+      .leaflet-control-attribution a { color: #06c !important; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>T1000-E Tracker</h1>
+      <a href="/">&larr; home</a>
+      <span id="status">loading&hellip;</span>
+      <div class="ranges" role="group" aria-label="Time range">
+        <button data-range="24h" aria-pressed="true">24h</button>
+        <button data-range="7d">7d</button>
+        <button data-range="30d">30d</button>
+        <button data-range="all">all</button>
+      </div>
+    </header>
+    <div id="map"></div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin="anonymous"
+      is:inline
+    ></script>
+    <script is:inline>
+      // Plain JS (Astro keeps this verbatim with is:inline). No imports here.
+      (() => {
+        const L = window.L;
+        const map = L.map('map', { zoomControl: true }).setView([52.5, -1.5], 6);
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        }).addTo(map);
+
+        const statusEl = document.getElementById('status');
+        let polyline = null;
+        let currentMarker = null;
+        let stopMarkers = [];
+
+        const setStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
+
+        function fmtAgo(ts) {
+          const diff = Date.now() - ts;
+          if (diff < 60_000) return Math.floor(diff / 1000) + 's ago';
+          if (diff < 3_600_000) return Math.floor(diff / 60_000) + 'm ago';
+          if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + 'h ago';
+          return Math.floor(diff / 86_400_000) + 'd ago';
+        }
+
+        async function load(range) {
+          setStatus('loading ' + range + '…');
+          const res = await fetch('/api/points?range=' + encodeURIComponent(range) + '&with_fix=1', { credentials: 'same-origin' });
+          if (!res.ok) {
+            setStatus('error: HTTP ' + res.status);
+            return;
+          }
+          const body = await res.json();
+          const points = body.points || [];
+
+          if (polyline) { map.removeLayer(polyline); polyline = null; }
+          if (currentMarker) { map.removeLayer(currentMarker); currentMarker = null; }
+          stopMarkers.forEach((m) => map.removeLayer(m));
+          stopMarkers = [];
+
+          if (points.length === 0) {
+            setStatus('no fixes in ' + range);
+            return;
+          }
+
+          // points is already chronological (ASC). Draw a track polyline.
+          const coords = points.map((p) => [p.lat, p.lon]);
+          polyline = L.polyline(coords, { color: '#1d68d0', weight: 3, opacity: 0.8 }).addTo(map);
+
+          // Current position = last point.
+          const last = points[points.length - 1];
+          currentMarker = L.marker([last.lat, last.lon]).addTo(map);
+          currentMarker.bindPopup(
+            '<strong>Current</strong><br>' +
+              fmtAgo(last.ts) + '<br>' +
+              'Battery ' + (last.battery_pct ?? '?') + '% (' + (last.battery_mv ?? '?') + ' mV)<br>' +
+              'Temp ' + (last.temp_c ?? '?') + ' &deg;C, Lux ' + (last.lux_pct ?? '?') + '%',
+          );
+
+          map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
+          setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + range + ')' + (body.truncated ? ' &mdash; truncated' : ''));
+        }
+
+        document.querySelectorAll('.ranges button[data-range]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            document.querySelectorAll('.ranges button[data-range]').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+            btn.setAttribute('aria-pressed', 'true');
+            const range = btn.getAttribute('data-range') || '24h';
+            location.hash = range;
+            load(range);
+          });
+        });
+
+        const initial = (location.hash || '#24h').replace(/^#/, '');
+        const validInitial = ['24h', '7d', '30d', 'all'].includes(initial) ? initial : '24h';
+        if (validInitial !== '24h') {
+          document.querySelectorAll('.ranges button[data-range]').forEach((b) => {
+            b.setAttribute('aria-pressed', b.getAttribute('data-range') === validInitial ? 'true' : 'false');
+          });
+        }
+        load(validInitial);
+      })();
+    </script>
+  </body>
+</html>

@@ -1,6 +1,35 @@
 ---
-// SSR landing page. Phase 1: placeholder. Phase 3 will pull latest position from D1.
-const renderedAt = new Date().toISOString();
+import { env } from 'cloudflare:workers';
+import { formatAgo, formatLatLon } from '../lib/format';
+
+interface LatestRow {
+  ts: number;
+  lat: number | null;
+  lon: number | null;
+  fix: number;
+  battery_pct: number | null;
+  battery_mv: number | null;
+  temp_c: number | null;
+  lux_pct: number | null;
+  motion: 0 | 1;
+  dev_eui: string;
+  f_cnt: number;
+}
+
+// SSR: pick the most recent uplink with a valid fix, plus the absolute latest
+// (which may be a no-fix frame — useful to show "device is alive but searching").
+const latestWithFix = await env.DB.prepare(
+  `SELECT received_at AS ts, latitude AS lat, longitude AS lon, fix_quality AS fix,
+          battery_pct, battery_mv, temp_c, lux_pct, motion, dev_eui, f_cnt
+     FROM uplinks WHERE fix_quality > 0 AND latitude IS NOT NULL
+     ORDER BY received_at DESC LIMIT 1`,
+).first<LatestRow>();
+
+const latestAny = await env.DB.prepare(
+  `SELECT received_at AS ts, latitude AS lat, longitude AS lon, fix_quality AS fix,
+          battery_pct, battery_mv, temp_c, lux_pct, motion, dev_eui, f_cnt
+     FROM uplinks ORDER BY received_at DESC LIMIT 1`,
+).first<LatestRow>();
 ---
 <html lang="en">
   <head>
@@ -9,15 +38,99 @@ const renderedAt = new Date().toISOString();
     <title>T1000-E Tracker</title>
     <style>
       :root { color-scheme: light dark; }
-      body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 4rem auto; padding: 0 1rem; line-height: 1.5; }
+      body { font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5; }
+      h1 { margin-bottom: 0.25rem; }
+      .sub { color: color-mix(in srgb, currentColor 55%, transparent); margin-top: 0; }
+      .card { border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 0.5rem; padding: 1rem 1.25rem; margin: 1rem 0; }
+      .row { display: flex; justify-content: space-between; gap: 1rem; }
+      .row + .row { margin-top: 0.35rem; }
+      .label { color: color-mix(in srgb, currentColor 55%, transparent); }
+      .value { font-variant-numeric: tabular-nums; }
+      .pill { display: inline-block; padding: 0.05em 0.5em; border-radius: 999px; font-size: 0.78em; background: color-mix(in srgb, currentColor 12%, transparent); }
+      .pill.motion { background: color-mix(in srgb, orange 30%, transparent); }
+      a.button { display: inline-block; padding: 0.5em 0.9em; border-radius: 0.4em; background: color-mix(in srgb, currentColor 12%, transparent); color: inherit; text-decoration: none; }
+      a.button:hover { background: color-mix(in srgb, currentColor 22%, transparent); }
       code { background: color-mix(in srgb, currentColor 10%, transparent); padding: 0.1em 0.3em; border-radius: 0.2em; font-size: 0.9em; }
-      .meta { color: color-mix(in srgb, currentColor 60%, transparent); font-size: 0.85em; }
     </style>
   </head>
   <body>
-    <h1>SenseCAP T1000-E LoRaWAN Tracker</h1>
-    <p>Phase 1 scaffold &mdash; Astro + Cloudflare Workers + Static Assets.</p>
-    <p>Next: D1 schema and the TTN ingest endpoint at <code>/api/ingest</code>.</p>
-    <p class="meta">SSR rendered at {renderedAt}</p>
+    <h1>T1000-E Tracker</h1>
+    <p class="sub">SenseCAP T1000-E over The Things Network &mdash; EU868</p>
+
+    {latestAny === null ? (
+      <div class="card">
+        <p>No uplinks recorded yet.</p>
+        <p class="sub">Configure the TTN webhook to POST to <code>/api/ingest</code> and wait for the next frame.</p>
+      </div>
+    ) : (
+      <>
+        <div class="card">
+          {latestWithFix !== null ? (
+            <>
+              <div class="row">
+                <span class="label">Position</span>
+                <span class="value">{formatLatLon(latestWithFix.lat!, latestWithFix.lon!)}</span>
+              </div>
+              <div class="row">
+                <span class="label">Fix age</span>
+                <span class="value">
+                  {formatAgo(latestWithFix.ts)}
+                  {latestWithFix.f_cnt === latestAny.f_cnt ? null : ' (older than last uplink)'}
+                </span>
+              </div>
+            </>
+          ) : (
+            <div class="row">
+              <span class="label">Position</span>
+              <span class="value">No GPS fix yet</span>
+            </div>
+          )}
+          <div class="row">
+            <span class="label">Last seen</span>
+            <span class="value">{formatAgo(latestAny.ts)}</span>
+          </div>
+          {latestAny.battery_pct !== null && (
+            <div class="row">
+              <span class="label">Battery</span>
+              <span class="value">
+                {latestAny.battery_pct}% &middot; {latestAny.battery_mv} mV
+              </span>
+            </div>
+          )}
+          {latestAny.temp_c !== null && (
+            <div class="row">
+              <span class="label">Temp (PCB)</span>
+              <span class="value">{latestAny.temp_c.toFixed(1)} &deg;C</span>
+            </div>
+          )}
+          {latestAny.lux_pct !== null && (
+            <div class="row">
+              <span class="label">Light</span>
+              <span class="value">{latestAny.lux_pct}%</span>
+            </div>
+          )}
+          <div class="row">
+            <span class="label">Motion</span>
+            <span class="value">
+              <span class={latestAny.motion ? 'pill motion' : 'pill'}>
+                {latestAny.motion ? 'detected' : 'still'}
+              </span>
+            </span>
+          </div>
+          <div class="row">
+            <span class="label">f_cnt</span>
+            <span class="value">{latestAny.f_cnt}</span>
+          </div>
+        </div>
+
+        <p>
+          <a class="button" href="/map">View on map &rarr;</a>
+        </p>
+      </>
+    )}
+
+    <p class="sub" style="margin-top: 3rem">
+      Source: <a href="https://github.com/">github.com/&hellip;</a> &middot; v0.1 &middot; Phase 3
+    </p>
   </body>
 </html>
