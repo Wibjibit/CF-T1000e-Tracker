@@ -15,7 +15,8 @@ interface PointRow {
   lon: number | null;
   alt: number | null;
   fix: number;
-  sats: number | null;
+  sats_tracked: number | null;
+  sats_in_view: number | null;
   hdop: number | null;
   speed: number | null;
   battery_pct: number | null;
@@ -52,7 +53,7 @@ export const GET: APIRoute = async ({ url }) => {
   const sql = `
     SELECT received_at AS ts,
            latitude AS lat, longitude AS lon, altitude_m AS alt,
-           fix_quality AS fix, sats_tracked AS sats, hdop, speed_kmh AS speed,
+           fix_quality AS fix, sats_tracked, sats_in_view, hdop, speed_kmh AS speed,
            battery_pct, battery_mv, temp_c, lux_pct, motion,
            rssi, snr, spreading_factor AS sf
       FROM uplinks
