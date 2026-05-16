@@ -22,15 +22,21 @@ export const prerender = false;
       header h1 { margin: 0; font-size: 1.05rem; }
       header a { color: inherit; text-decoration: none; opacity: 0.7; }
       header a:hover { opacity: 1; }
-      .ranges { display: flex; gap: 0.3rem; margin-left: auto; }
-      .ranges button {
-        padding: 0.3em 0.7em; border-radius: 0.3em; border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
-        background: transparent; color: inherit; cursor: pointer; font: inherit;
+      .auto-refresh { display: flex; align-items: center; gap: 0.35em; font-size: 0.85rem; opacity: 0.85; cursor: pointer; }
+      .auto-refresh input { cursor: pointer; }
+      .ranges { margin-left: auto; }
+      .ranges select {
+        font: inherit; padding: 0.35em 0.6em; padding-right: 1.8em; border-radius: 0.3em;
+        border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+        background: transparent; color: inherit; cursor: pointer;
+        appearance: none; -webkit-appearance: none;
+        background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+        background-position: calc(100% - 14px) 50%, calc(100% - 8px) 50%;
+        background-size: 6px 6px, 6px 6px;
+        background-repeat: no-repeat;
       }
-      .ranges button[aria-pressed="true"] {
-        background: color-mix(in srgb, currentColor 15%, transparent);
-        border-color: color-mix(in srgb, currentColor 35%, transparent);
-      }
+      .ranges select:focus { outline: 2px solid color-mix(in srgb, currentColor 35%, transparent); outline-offset: 1px; }
+      .ranges select option { color: black; background: white; }
       #status { font-size: 0.85rem; opacity: 0.7; }
       #map { flex: 1 1 auto; min-height: 0; }
       /* Force Leaflet attribution to a readable contrast in dark mode. */
@@ -45,11 +51,19 @@ export const prerender = false;
       <a href="/timeline">timeline</a>
       <a href="/settings">settings</a>
       <span id="status">loading&hellip;</span>
-      <div class="ranges" role="group" aria-label="Time range">
-        <button data-range="24h" aria-pressed="true">24h</button>
-        <button data-range="7d">7d</button>
-        <button data-range="30d">30d</button>
-        <button data-range="all">all</button>
+      <label class="auto-refresh" title="Re-fetch every 5 minutes">
+        <input type="checkbox" id="auto-refresh" />
+        Auto-refresh
+      </label>
+      <div class="ranges">
+        <select id="range-select" aria-label="Time range">
+          <option value="1h">Last hour</option>
+          <option value="6h">Last 6 hours</option>
+          <option value="24h" selected>Last 24 hours</option>
+          <option value="7d">Last 7 days</option>
+          <option value="30d">Last 30 days</option>
+          <option value="all">All time</option>
+        </select>
       </div>
     </header>
     <div id="map"></div>
@@ -123,23 +137,61 @@ export const prerender = false;
           setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + range + ')' + (body.truncated ? ' &mdash; truncated' : ''));
         }
 
-        document.querySelectorAll('.ranges button[data-range]').forEach((btn) => {
-          btn.addEventListener('click', () => {
-            document.querySelectorAll('.ranges button[data-range]').forEach((b) => b.setAttribute('aria-pressed', 'false'));
-            btn.setAttribute('aria-pressed', 'true');
-            const range = btn.getAttribute('data-range') || '24h';
-            location.hash = range;
-            load(range);
-          });
-        });
+        const select = document.getElementById('range-select');
+        const VALID_RANGES = ['1h', '6h', '24h', '7d', '30d', 'all'];
+        const AUTO_REFRESH_MS = 5 * 60 * 1000;
+        const AUTO_REFRESH_KEY = 'tracker.map.autoRefresh';
 
-        const initial = (location.hash || '#24h').replace(/^#/, '');
-        const validInitial = ['24h', '7d', '30d', 'all'].includes(initial) ? initial : '24h';
-        if (validInitial !== '24h') {
-          document.querySelectorAll('.ranges button[data-range]').forEach((b) => {
-            b.setAttribute('aria-pressed', b.getAttribute('data-range') === validInitial ? 'true' : 'false');
+        let refreshTimer = null;
+        function currentRange() {
+          return select ? select.value : '24h';
+        }
+        function startAutoRefresh() {
+          stopAutoRefresh();
+          refreshTimer = setInterval(() => load(currentRange()), AUTO_REFRESH_MS);
+        }
+        function stopAutoRefresh() {
+          if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+        }
+
+        function applyRange(range) {
+          location.hash = range;
+          load(range);
+          // Re-arm the timer so the next auto refresh is a full interval from now,
+          // not on top of a manual reload.
+          const cb = document.getElementById('auto-refresh');
+          if (cb && cb.checked) startAutoRefresh();
+        }
+
+        if (select) {
+          select.addEventListener('change', (e) => applyRange(e.target.value));
+        }
+
+        const autoCb = document.getElementById('auto-refresh');
+        if (autoCb) {
+          autoCb.checked = localStorage.getItem(AUTO_REFRESH_KEY) === '1';
+          if (autoCb.checked) startAutoRefresh();
+          autoCb.addEventListener('change', () => {
+            if (autoCb.checked) {
+              localStorage.setItem(AUTO_REFRESH_KEY, '1');
+              startAutoRefresh();
+            } else {
+              localStorage.removeItem(AUTO_REFRESH_KEY);
+              stopAutoRefresh();
+            }
+          });
+          // Pause the timer when the tab is hidden — no point burning requests
+          // and battery on a backgrounded page.
+          document.addEventListener('visibilitychange', () => {
+            if (!autoCb.checked) return;
+            if (document.hidden) stopAutoRefresh();
+            else { load(currentRange()); startAutoRefresh(); }
           });
         }
+
+        const initial = (location.hash || '#24h').replace(/^#/, '');
+        const validInitial = VALID_RANGES.includes(initial) ? initial : '24h';
+        if (select) select.value = validInitial;
         load(validInitial);
       })();
     </script>

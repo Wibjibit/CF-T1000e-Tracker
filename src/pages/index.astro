@@ -36,6 +36,14 @@ const latestAny = await env.DB.prepare(
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>T1000-E Tracker</title>
+    {latestWithFix !== null && (
+      <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin="anonymous"
+      />
+    )}
     <style>
       :root { color-scheme: light dark; }
       body { font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5; }
@@ -51,6 +59,24 @@ const latestAny = await env.DB.prepare(
       a.button { display: inline-block; padding: 0.5em 0.9em; border-radius: 0.4em; background: color-mix(in srgb, currentColor 12%, transparent); color: inherit; text-decoration: none; }
       a.button:hover { background: color-mix(in srgb, currentColor 22%, transparent); }
       code { background: color-mix(in srgb, currentColor 10%, transparent); padding: 0.1em 0.3em; border-radius: 0.2em; font-size: 0.9em; }
+
+      /* Mini map: clickable preview of the latest fix; full controls live on /map. */
+      .mini-map-link { display: block; margin: 1rem 0; text-decoration: none; }
+      .mini-map {
+        height: 240px; width: 100%;
+        border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+        border-radius: 0.5rem; overflow: hidden;
+        cursor: pointer; position: relative;
+      }
+      .mini-map-hint {
+        position: absolute; right: 0.5rem; top: 0.5rem; z-index: 500;
+        background: rgba(255,255,255,0.85); color: #222;
+        padding: 0.1em 0.5em; border-radius: 0.25em; font-size: 0.75rem;
+        pointer-events: none;
+      }
+      /* Force Leaflet attribution to a readable contrast in dark mode. */
+      .leaflet-control-attribution { background: rgba(255, 255, 255, 0.7) !important; color: #222 !important; }
+      .leaflet-control-attribution a { color: #06c !important; }
     </style>
   </head>
   <body>
@@ -64,6 +90,19 @@ const latestAny = await env.DB.prepare(
       </div>
     ) : (
       <>
+        {latestWithFix !== null && (
+          <a class="mini-map-link" href="/map" aria-label="Open full map">
+            <div
+              class="mini-map"
+              id="mini-map"
+              data-lat={latestWithFix.lat}
+              data-lon={latestWithFix.lon}
+            >
+              <span class="mini-map-hint">View full map &rarr;</span>
+            </div>
+          </a>
+        )}
+
         <div class="card">
           {latestWithFix !== null ? (
             <>
@@ -136,5 +175,46 @@ const latestAny = await env.DB.prepare(
       <a href="/settings">settings</a> &middot;
       <a href="/api/auth/logout">sign out</a>
     </p>
+
+    {latestWithFix !== null && (
+      <>
+        <script
+          src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+          crossorigin="anonymous"
+          is:inline
+        ></script>
+        <script is:inline>
+          (() => {
+            const el = document.getElementById('mini-map');
+            if (!el || !window.L) return;
+            const lat = parseFloat(el.getAttribute('data-lat'));
+            const lon = parseFloat(el.getAttribute('data-lon'));
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+            // Static-ish: no controls, no scroll/drag — the whole tile is wrapped
+            // in <a href="/map">, so any click navigates to the full map.
+            const map = L.map(el, {
+              center: [lat, lon],
+              zoom: 16,
+              zoomControl: false,
+              dragging: false,
+              scrollWheelZoom: false,
+              doubleClickZoom: false,
+              touchZoom: false,
+              boxZoom: false,
+              keyboard: false,
+              tap: false,
+              attributionControl: true,
+            });
+            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+              maxZoom: 19,
+              attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            }).addTo(map);
+            L.marker([lat, lon]).addTo(map);
+          })();
+        </script>
+      </>
+    )}
   </body>
 </html>
