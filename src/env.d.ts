@@ -1,26 +1,9 @@
 /// <reference path="../.astro/types.d.ts" />
-/// <reference types="@cloudflare/workers-types" />
+/// <reference path="../worker-configuration.d.ts" />
 
-// Bindings + secrets visible inside the Worker / Astro SSR routes.
-// Mirrors wrangler.jsonc + .dev.vars.example.
-interface Env {
-  // Static assets binding (Workers + Static Assets).
-  ASSETS: Fetcher;
-
-  // TTN webhook Basic auth.
-  TTN_BASIC_AUTH_USER: string;
-  TTN_BASIC_AUTH_PASS: string;
-
-  // Dashboard TOTP gate.
-  TOTP_SECRET: string;
-  COOKIE_SECRET: string;
-
-  // Device identity filter.
-  EXPECTED_DEV_EUI: string;
-
-  // D1 (wired in Phase 2).
-  // DB: D1Database;
-}
+// The global Env interface and Cloudflare.Env namespace are auto-generated
+// by `wrangler types` based on bindings + secrets in wrangler.jsonc and
+// .dev.vars.example. Re-run `wrangler types` after editing wrangler.jsonc.
 
 type Runtime = import('@astrojs/cloudflare').Runtime<Env>;
 

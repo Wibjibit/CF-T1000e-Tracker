@@ -1,6 +1,10 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "cf-t1000e-tracker",
+  // "Pauls Account" — pinned so we can't accidentally deploy to another account
+  // if you ever 'wrangler login' under a different email. Override locally if
+  // you fork this repo onto your own account.
+  "account_id": "a3c6a5b41c0312ead688ef0c16313b45",
   "compatibility_date": "2026-05-16",
   "compatibility_flags": ["nodejs_compat"],
 
@@ -14,10 +18,14 @@
 
   "observability": {
     "enabled": true
-  }
+  },
 
-  // D1 binding (added in Phase 2):
-  // "d1_databases": [
-  //   { "binding": "DB", "database_name": "tracker", "database_id": "<created-via-wrangler-d1-create>" }
-  // ]
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tracker",
+      "database_id": "1b4cbacf-0841-48fa-a672-84ff04df5a33",
+      "migrations_dir": "migrations"
+    }
+  ]
 }

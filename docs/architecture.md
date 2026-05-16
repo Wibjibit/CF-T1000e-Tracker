@@ -46,6 +46,12 @@ Cloudflare's free Rate Limiting binding gates `/api/auth/verify` to 5 attempts p
 
 TTN's free tier sends each uplink once with no retries. We treat at-most-once delivery as fine for a personal tracker. The `(dev_eui, f_cnt)` primary key still means that if retries are ever enabled (paid plan), duplicate webhook deliveries simply collide on insert and become no-ops.
 
+## Deployment target
+
+- **Cloudflare account:** "Pauls Account" (`a3c6a5b41c0312ead688ef0c16313b45`), pinned in `wrangler.jsonc`.
+- **Production hostname:** `tracker.wibjibit.com`. Wired up in Phase 6 via a custom-domain binding on the Worker; requires the `wibjibit.com` zone to be on the same account.
+- **Dev/preview URL:** `cf-t1000e-tracker.<account>.workers.dev` once first deployed; falls back to `http://localhost:4321/` from `npm run dev`.
+
 ## What's deliberately not here
 
 - **Queues / Durable Objects** &mdash; not needed at 720 writes/day; D1 absorbs the writes directly.

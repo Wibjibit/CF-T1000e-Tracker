@@ -2,6 +2,9 @@
 // Paste into TTN Console → device → Payload formatters → Uplink →
 // Formatter type: "Custom JavaScript formatter".
 //
+// SYNC: mirrors src/lib/decoder.ts byte-for-byte. When the payload format
+// changes, update both files in the same commit.
+//
 // Matches firmware payload layout in apps/examples/08_lorawan_gnss/main_lorawan_gnss.c
 // (gnss_ttn_v9). v8 was 19 bytes; v9 appends 7 bytes of environment data.
 //
