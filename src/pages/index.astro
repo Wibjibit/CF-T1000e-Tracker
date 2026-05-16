@@ -6,30 +6,59 @@ interface LatestRow {
   ts: number;
   lat: number | null;
   lon: number | null;
+  alt: number | null;
   fix: number;
+  sats_tracked: number | null;
+  sats_in_view: number | null;
+  hdop: number | null;
+  speed: number | null;
   battery_pct: number | null;
   battery_mv: number | null;
   temp_c: number | null;
   lux_pct: number | null;
   motion: 0 | 1;
+  rssi: number | null;
+  snr: number | null;
+  sf: number | null;
+  gateway_id: string | null;
   dev_eui: string;
   f_cnt: number;
 }
 
+const LATEST_COLUMNS = `
+  received_at AS ts,
+  latitude AS lat, longitude AS lon, altitude_m AS alt,
+  fix_quality AS fix, sats_tracked, sats_in_view, hdop, speed_kmh AS speed,
+  battery_pct, battery_mv, temp_c, lux_pct, motion,
+  rssi, snr, spreading_factor AS sf, gateway_id,
+  dev_eui, f_cnt
+`;
+
 // SSR: pick the most recent uplink with a valid fix, plus the absolute latest
 // (which may be a no-fix frame — useful to show "device is alive but searching").
 const latestWithFix = await env.DB.prepare(
-  `SELECT received_at AS ts, latitude AS lat, longitude AS lon, fix_quality AS fix,
-          battery_pct, battery_mv, temp_c, lux_pct, motion, dev_eui, f_cnt
+  `SELECT ${LATEST_COLUMNS}
      FROM uplinks WHERE fix_quality > 0 AND latitude IS NOT NULL
      ORDER BY received_at DESC LIMIT 1`,
 ).first<LatestRow>();
 
 const latestAny = await env.DB.prepare(
-  `SELECT received_at AS ts, latitude AS lat, longitude AS lon, fix_quality AS fix,
-          battery_pct, battery_mv, temp_c, lux_pct, motion, dev_eui, f_cnt
+  `SELECT ${LATEST_COLUMNS}
      FROM uplinks ORDER BY received_at DESC LIMIT 1`,
 ).first<LatestRow>();
+
+function fixLabel(fix: number | null | undefined): string {
+  if (fix === 1) return 'GPS';
+  if (fix === 2) return 'DGPS';
+  return 'invalid';
+}
+
+function shortGateway(id: string | null): string {
+  if (!id) return '—';
+  // eui-3234333640004d00 -> 4d00
+  const m = id.match(/[0-9a-fA-F]{4}$/);
+  return m ? '…' + m[0] : id;
+}
 ---
 <html lang="en">
   <head>
@@ -54,6 +83,8 @@ const latestAny = await env.DB.prepare(
       .row + .row { margin-top: 0.35rem; }
       .label { color: color-mix(in srgb, currentColor 55%, transparent); }
       .value { font-variant-numeric: tabular-nums; }
+      .group { margin-top: 0.85rem; padding-top: 0.85rem; border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent); }
+      .group-title { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: color-mix(in srgb, currentColor 50%, transparent); margin-bottom: 0.45rem; }
       .pill { display: inline-block; padding: 0.05em 0.5em; border-radius: 999px; font-size: 0.78em; background: color-mix(in srgb, currentColor 12%, transparent); }
       .pill.motion { background: color-mix(in srgb, orange 30%, transparent); }
       a.button { display: inline-block; padding: 0.5em 0.9em; border-radius: 0.4em; background: color-mix(in srgb, currentColor 12%, transparent); color: inherit; text-decoration: none; }
@@ -128,37 +159,103 @@ const latestAny = await env.DB.prepare(
             <span class="label">Last seen</span>
             <span class="value">{formatAgo(latestAny.ts)}</span>
           </div>
-          {latestAny.battery_pct !== null && (
+
+          <div class="group">
+            <div class="group-title">GPS</div>
             <div class="row">
-              <span class="label">Battery</span>
-              <span class="value">
-                {latestAny.battery_pct}% &middot; {latestAny.battery_mv} mV
-              </span>
+              <span class="label">Fix quality</span>
+              <span class="value">{fixLabel(latestAny.fix)}</span>
             </div>
-          )}
-          {latestAny.temp_c !== null && (
-            <div class="row">
-              <span class="label">Temp (PCB)</span>
-              <span class="value">{latestAny.temp_c.toFixed(1)} &deg;C</span>
-            </div>
-          )}
-          {latestAny.lux_pct !== null && (
-            <div class="row">
-              <span class="label">Light</span>
-              <span class="value">{latestAny.lux_pct}%</span>
-            </div>
-          )}
-          <div class="row">
-            <span class="label">Motion</span>
-            <span class="value">
-              <span class={latestAny.motion ? 'pill motion' : 'pill'}>
-                {latestAny.motion ? 'detected' : 'still'}
-              </span>
-            </span>
+            {(latestAny.sats_tracked !== null || latestAny.sats_in_view !== null) && (
+              <div class="row">
+                <span class="label">Satellites</span>
+                <span class="value">
+                  {latestAny.sats_tracked ?? '—'} tracked &middot; {latestAny.sats_in_view ?? '—'} in view
+                </span>
+              </div>
+            )}
+            {latestAny.hdop !== null && (
+              <div class="row">
+                <span class="label">HDOP</span>
+                <span class="value">{latestAny.hdop.toFixed(2)}</span>
+              </div>
+            )}
+            {latestAny.alt !== null && (
+              <div class="row">
+                <span class="label">Altitude</span>
+                <span class="value">{latestAny.alt} m</span>
+              </div>
+            )}
+            {latestAny.speed !== null && (
+              <div class="row">
+                <span class="label">Speed</span>
+                <span class="value">{latestAny.speed} km/h</span>
+              </div>
+            )}
           </div>
-          <div class="row">
-            <span class="label">f_cnt</span>
-            <span class="value">{latestAny.f_cnt}</span>
+
+          <div class="group">
+            <div class="group-title">Sensors</div>
+            {latestAny.battery_pct !== null && (
+              <div class="row">
+                <span class="label">Battery</span>
+                <span class="value">
+                  {latestAny.battery_pct}% &middot; {latestAny.battery_mv} mV
+                </span>
+              </div>
+            )}
+            {latestAny.temp_c !== null && (
+              <div class="row">
+                <span class="label">Temp (PCB)</span>
+                <span class="value">{latestAny.temp_c.toFixed(1)} &deg;C</span>
+              </div>
+            )}
+            {latestAny.lux_pct !== null && (
+              <div class="row">
+                <span class="label">Light</span>
+                <span class="value">{latestAny.lux_pct}%</span>
+              </div>
+            )}
+            <div class="row">
+              <span class="label">Motion</span>
+              <span class="value">
+                <span class={latestAny.motion ? 'pill motion' : 'pill'}>
+                  {latestAny.motion ? 'detected' : 'still'}
+                </span>
+              </span>
+            </div>
+          </div>
+
+          <div class="group">
+            <div class="group-title">Radio</div>
+            {latestAny.rssi !== null && (
+              <div class="row">
+                <span class="label">RSSI</span>
+                <span class="value">{latestAny.rssi} dBm</span>
+              </div>
+            )}
+            {latestAny.snr !== null && (
+              <div class="row">
+                <span class="label">SNR</span>
+                <span class="value">{latestAny.snr.toFixed(2)} dB</span>
+              </div>
+            )}
+            {latestAny.sf !== null && (
+              <div class="row">
+                <span class="label">Spreading factor</span>
+                <span class="value">SF{latestAny.sf}</span>
+              </div>
+            )}
+            {latestAny.gateway_id !== null && (
+              <div class="row">
+                <span class="label">Gateway</span>
+                <span class="value" title={latestAny.gateway_id}>{shortGateway(latestAny.gateway_id)}</span>
+              </div>
+            )}
+            <div class="row">
+              <span class="label">f_cnt</span>
+              <span class="value">{latestAny.f_cnt}</span>
+            </div>
           </div>
         </div>
 
