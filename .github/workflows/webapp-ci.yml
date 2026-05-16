@@ -32,3 +32,7 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run build
+      # Lightweight syntax check on the standalone TTN-console decoder.
+      # We don't ship its output to TTN from CI, but a syntax error here
+      # would break the paste-in artefact for anyone configuring TTN.
+      - run: node --check ../decoder/ttn_decoder.js

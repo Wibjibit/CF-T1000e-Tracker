@@ -7,8 +7,6 @@ const SESSION_COOKIE = 'session';
 const DAY_SECONDS = 24 * 60 * 60;
 const DEFAULT_LIFETIME_SECONDS = 7 * DAY_SECONDS;
 
-export const SESSION_COOKIE_NAME = SESSION_COOKIE;
-
 function b64urlEncode(bytes: Uint8Array): string {
   let s = '';
   for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]!);

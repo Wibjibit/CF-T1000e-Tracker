@@ -280,6 +280,7 @@ function shortGateway(id: string | null): string {
           is:inline
         ></script>
         <script is:inline>
+          // @ts-nocheck
           (() => {
             const el = document.getElementById('mini-map');
             if (!el || !window.L) return;

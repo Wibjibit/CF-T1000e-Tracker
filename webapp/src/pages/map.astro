@@ -74,32 +74,38 @@ export const prerender = false;
       crossorigin="anonymous"
       is:inline
     ></script>
-    <script is:inline>
-      // Plain JS (Astro keeps this verbatim with is:inline). No imports here.
-      (() => {
-        const L = window.L;
-        const map = L.map('map', { zoomControl: true }).setView([52.5, -1.5], 6);
-        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          maxZoom: 19,
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        }).addTo(map);
+    <script>
+      // @ts-nocheck
+      // Bundled by Astro. window.L (Leaflet) comes from the classic CDN
+      // <script> above; classic scripts run before module scripts so it's
+      // there by the time we execute. @ts-nocheck because Leaflet's runtime
+      // globals aren't typed in this project — the data flow into the page
+      // is exercised by the existing CI build + manual smoke tests.
+      import { wireDashboard } from '../scripts/dashboard';
 
-        const statusEl = document.getElementById('status');
-        let polyline = null;
-        let currentMarker = null;
-        let stopMarkers = [];
+      const L = window.L;
+      const map = L.map('map', { zoomControl: true }).setView([52.5, -1.5], 6);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      }).addTo(map);
 
-        const setStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
+      const statusEl = document.getElementById('status');
+      let polyline = null;
+      let currentMarker = null;
+      let stopMarkers = [];
 
-        function fmtAgo(ts) {
-          const diff = Date.now() - ts;
-          if (diff < 60_000) return Math.floor(diff / 1000) + 's ago';
-          if (diff < 3_600_000) return Math.floor(diff / 60_000) + 'm ago';
-          if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + 'h ago';
-          return Math.floor(diff / 86_400_000) + 'd ago';
-        }
+      const setStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
 
-        async function load(range) {
+      function fmtAgo(ts) {
+        const diff = Date.now() - ts;
+        if (diff < 60_000) return Math.floor(diff / 1000) + 's ago';
+        if (diff < 3_600_000) return Math.floor(diff / 60_000) + 'm ago';
+        if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + 'h ago';
+        return Math.floor(diff / 86_400_000) + 'd ago';
+      }
+
+      async function load(range) {
           setStatus('loading ' + range + '…');
           const res = await fetch('/api/points?range=' + encodeURIComponent(range) + '&with_fix=1', { credentials: 'same-origin' });
           if (!res.ok) {
@@ -133,74 +139,15 @@ export const prerender = false;
               'Temp ' + (last.temp_c ?? '?') + ' &deg;C, Lux ' + (last.lux_pct ?? '?') + '%',
           );
 
-          map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
-          setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + range + ')' + (body.truncated ? ' &mdash; truncated' : ''));
-        }
+        map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
+        setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + range + ')' + (body.truncated ? ' &mdash; truncated' : ''));
+      }
 
-        const select = document.getElementById('range-select');
-        const VALID_RANGES = ['1h', '6h', '24h', '7d', '30d', 'all'];
-        const AUTO_REFRESH_MS = 5 * 60 * 1000;
-        const AUTO_REFRESH_KEY = 'tracker.autoRefresh';
-        // One-time migration from the old map-scoped key so existing users
-        // keep their preference when the timeline page started sharing it.
-        const legacy = localStorage.getItem('tracker.map.autoRefresh');
-        if (legacy !== null && localStorage.getItem(AUTO_REFRESH_KEY) === null) {
-          localStorage.setItem(AUTO_REFRESH_KEY, legacy);
-          localStorage.removeItem('tracker.map.autoRefresh');
-        }
-
-        let refreshTimer = null;
-        function currentRange() {
-          return select ? select.value : '24h';
-        }
-        function startAutoRefresh() {
-          stopAutoRefresh();
-          refreshTimer = setInterval(() => load(currentRange()), AUTO_REFRESH_MS);
-        }
-        function stopAutoRefresh() {
-          if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
-        }
-
-        function applyRange(range) {
-          location.hash = range;
-          load(range);
-          // Re-arm the timer so the next auto refresh is a full interval from now,
-          // not on top of a manual reload.
-          const cb = document.getElementById('auto-refresh');
-          if (cb && cb.checked) startAutoRefresh();
-        }
-
-        if (select) {
-          select.addEventListener('change', (e) => applyRange(e.target.value));
-        }
-
-        const autoCb = document.getElementById('auto-refresh');
-        if (autoCb) {
-          autoCb.checked = localStorage.getItem(AUTO_REFRESH_KEY) === '1';
-          if (autoCb.checked) startAutoRefresh();
-          autoCb.addEventListener('change', () => {
-            if (autoCb.checked) {
-              localStorage.setItem(AUTO_REFRESH_KEY, '1');
-              startAutoRefresh();
-            } else {
-              localStorage.removeItem(AUTO_REFRESH_KEY);
-              stopAutoRefresh();
-            }
-          });
-          // Pause the timer when the tab is hidden — no point burning requests
-          // and battery on a backgrounded page.
-          document.addEventListener('visibilitychange', () => {
-            if (!autoCb.checked) return;
-            if (document.hidden) stopAutoRefresh();
-            else { load(currentRange()); startAutoRefresh(); }
-          });
-        }
-
-        const initial = (location.hash || '#24h').replace(/^#/, '');
-        const validInitial = VALID_RANGES.includes(initial) ? initial : '24h';
-        if (select) select.value = validInitial;
-        load(validInitial);
-      })();
+      wireDashboard({
+        selectId: 'range-select',
+        checkboxId: 'auto-refresh',
+        load,
+      });
     </script>
   </body>
 </html>

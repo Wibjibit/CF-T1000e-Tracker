@@ -75,6 +75,3 @@ export async function verifyTOTP(
   }
   return false;
 }
-
-/** Exposed for tests. */
-export const _internal = { totpAt };

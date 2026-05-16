@@ -193,11 +193,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const d = result.data;
 
   // 5. Pick the best gateway (highest RSSI) for radio metadata columns.
+  // Filter out entries missing rssi entirely so a null doesn't accidentally
+  // outrank a real -120 dBm reading via a sentinel.
   const rxs = body.uplink_message?.rx_metadata ?? [];
   const best = rxs.reduce<(typeof rxs)[number] | null>((acc, cur) => {
-    if (!cur) return acc;
-    if (!acc) return cur;
-    return (cur.rssi ?? -999) > (acc.rssi ?? -999) ? cur : acc;
+    if (!cur || cur.rssi == null) return acc;
+    if (!acc || acc.rssi == null) return cur;
+    return cur.rssi > acc.rssi ? cur : acc;
   }, null);
 
   const spreadingFactor = body.uplink_message?.settings?.data_rate?.lora?.spreading_factor ?? null;

@@ -131,20 +131,18 @@ The firmware and webapp evolve together but ship independently. A firmware chang
 
 See [`docs/architecture.md`](docs/architecture.md) for the full picture.
 
-## Status
+## What's shipped
 
-| Phase | Scope | State |
-|---|---|---|
-| 1 | Astro / Cloudflare scaffold | done |
-| 2 | D1 schema + TTN ingest endpoint | done |
-| 3 | Read API + map page | done |
-| 4 | TOTP auth | done |
-| 5 | Timeline / sensor charts | done |
-| 6 | Production deploy (custom domain) | done |
-| 6.1 | TTN Mapper forwarder (settings + audit log) | done (blocked upstream — TTN Mapper TTS v3 server queue is jammed; see audit log) |
-| 7 | Firmware in repo (credentials split out) | done |
+- Astro / Cloudflare Workers scaffold with D1 + Static Assets
+- TTN ingest webhook (Basic auth, idempotent on `(dev_eui, f_cnt)`)
+- Read API + map page (Leaflet + OSM, polyline by selectable range)
+- TOTP auth (signed session cookie, D1-backed rate limit)
+- Sensor timeline with charts for every captured field (uPlot)
+- Production deploy on a custom domain (Cloudflare auto-TLS)
+- Configurable downstream forwarder with audit log (currently TTN Mapper, runs via `waitUntil` so their slowness can't time us out from TTN's side)
+- Firmware in the repo with credentials split out into a gitignored sibling header
 
-### Future work
+## Future work
 
 - **`/coverage` page** — heatmap + reception "beams" overlaid on OSM. Data is already in D1: every uplink has `lat`, `lon`, `rssi`, `snr`, `gateway_id`. Needs a gateway-coordinates lookup.
 - **NTC temperature calibration** — firmware reads ~10 °C cold; see [`firmware/README.md`](firmware/README.md) for the back-solve approach.

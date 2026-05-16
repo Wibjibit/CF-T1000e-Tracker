@@ -1,6 +1,6 @@
 # Architecture
 
-How the bits fit together. Updated 2026-05-16 after Phase 7 monorepo restructure.
+How the bits fit together.
 
 ## Goals
 
@@ -80,8 +80,8 @@ TTN's free tier sends each uplink once with no retries. We treat at-most-once de
 
 ## Deployment target
 
-- **Cloudflare account:** "Pauls Account" (`a3c6a5b41c0312ead688ef0c16313b45`), pinned in `webapp/wrangler.jsonc`.
-- **Production hostname:** `tracker.wibjibit.com` via a custom-domain Worker binding. Cloudflare auto-provisions the TLS cert. `workers.dev` URL is auto-disabled when a custom domain is bound.
+- **Cloudflare account:** pinned via `account_id` in `webapp/wrangler.jsonc`. Reads as a comment block at the top of the file (FORK SETUP).
+- **Production hostname:** custom-domain Worker binding (e.g. `tracker.example.com`). The zone has to be on the same Cloudflare account as the Worker; Cloudflare auto-provisions the TLS certificate after the first deploy. `workers.dev` URL is auto-disabled when a custom domain is bound &mdash; delete the `routes` block in `wrangler.jsonc` to keep `*.workers.dev` if you don't have a custom domain yet.
 - **Dev/preview URL:** `npm run dev` (Astro + workerd via Vite) at `http://localhost:4321/`.
 
 ## Build / deploy

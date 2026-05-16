@@ -101,9 +101,15 @@ export const prerender = false;
       crossorigin="anonymous"
       is:inline
     ></script>
-    <script is:inline>
-      (() => {
-        const uPlot = window.uPlot;
+    <script>
+      // @ts-nocheck
+      // Bundled by Astro. window.uPlot comes from the classic CDN <script>
+      // above; classic scripts run before module scripts so it's there by
+      // the time we execute. @ts-nocheck because uPlot's runtime globals
+      // aren't typed in this project.
+      import { wireDashboard } from '../scripts/dashboard';
+
+      const uPlot = window.uPlot;
         const statusEl = document.getElementById('status');
         const setStatus = (m) => { if (statusEl) statusEl.textContent = m; };
 
@@ -275,7 +281,7 @@ export const prerender = false;
 
           charts.battery   = makeChart('chart-battery',    xs, batteryPct, { label: 'battery %', color: '#3aaa3a', min: 0, max: 100, unit: '%',     decimals: 0, fmt: (v) => v.toFixed(0) + '%' });
           charts.batteryMv = makeChart('chart-battery-mv', xs, batteryMv,  { label: 'mV',        color: '#2a8d2a',                  unit: ' mV',   decimals: 0, fmt: (v) => v.toFixed(0) + ' mV' });
-          charts.temp      = makeChart('chart-temp',       xs, tempC,      { label: '°C',        color: '#c33',                     unit: ' °C',   decimals: 1, fmt: (v) => v.toFixed(2) + ' °C' });
+          charts.temp      = makeChart('chart-temp',       xs, tempC,      { label: '°C',        color: '#c33',                     unit: ' °C',   decimals: 1, fmt: (v) => v.toFixed(1) + ' °C' });
           charts.lux       = makeChart('chart-lux',        xs, luxPct,     { label: 'light %',   color: '#d4a017', min: 0, max: 100, unit: '%',     decimals: 0, fmt: (v) => v.toFixed(0) + '%' });
           charts.rssi      = makeChart('chart-rssi',       xs, rssi,       { label: 'dBm',       color: '#1d68d0',                  unit: ' dBm',  decimals: 0, fmt: (v) => v.toFixed(0) + ' dBm' });
           charts.snr       = makeChart('chart-snr',        xs, snr,        { label: 'dB',        color: '#8a44d3',                  unit: ' dB',   decimals: 1, fmt: (v) => v.toFixed(1) + ' dB' });
@@ -307,73 +313,15 @@ export const prerender = false;
           const motionCount = motion.reduce((a, b) => a + b, 0);
           setLatest('motion_count', motionCount + ' of ' + points.length);
 
-          setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + range + ')' + (body.truncated ? ' — truncated' : ''));
-        }
+        setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + range + ')' + (body.truncated ? ' — truncated' : ''));
+      }
 
-        const select = document.getElementById('range-select');
-        const VALID_RANGES = ['1h', '6h', '24h', '7d', '30d', 'all'];
-        const AUTO_REFRESH_MS = 5 * 60 * 1000;
-        const AUTO_REFRESH_KEY = 'tracker.autoRefresh';
-        // One-time migration from the old map-scoped key.
-        const legacy = localStorage.getItem('tracker.map.autoRefresh');
-        if (legacy !== null && localStorage.getItem(AUTO_REFRESH_KEY) === null) {
-          localStorage.setItem(AUTO_REFRESH_KEY, legacy);
-          localStorage.removeItem('tracker.map.autoRefresh');
-        }
-
-        let refreshTimer = null;
-        const currentRange = () => (select ? select.value : '24h');
-        function startAutoRefresh() {
-          stopAutoRefresh();
-          refreshTimer = setInterval(() => load(currentRange()), AUTO_REFRESH_MS);
-        }
-        function stopAutoRefresh() {
-          if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
-        }
-
-        // Resize: rebuild on window resize. Simple but correct; uPlot doesn't auto-resize.
-        let resizeTimer = null;
-        window.addEventListener('resize', () => {
-          if (resizeTimer) clearTimeout(resizeTimer);
-          resizeTimer = setTimeout(() => load(currentRange()), 200);
-        });
-
-        if (select) {
-          select.addEventListener('change', (e) => {
-            const range = e.target.value;
-            location.hash = range;
-            load(range);
-            // Re-arm so the next auto refresh is a full interval from now.
-            const cb = document.getElementById('auto-refresh');
-            if (cb && cb.checked) startAutoRefresh();
-          });
-        }
-
-        const autoCb = document.getElementById('auto-refresh');
-        if (autoCb) {
-          autoCb.checked = localStorage.getItem(AUTO_REFRESH_KEY) === '1';
-          if (autoCb.checked) startAutoRefresh();
-          autoCb.addEventListener('change', () => {
-            if (autoCb.checked) {
-              localStorage.setItem(AUTO_REFRESH_KEY, '1');
-              startAutoRefresh();
-            } else {
-              localStorage.removeItem(AUTO_REFRESH_KEY);
-              stopAutoRefresh();
-            }
-          });
-          document.addEventListener('visibilitychange', () => {
-            if (!autoCb.checked) return;
-            if (document.hidden) stopAutoRefresh();
-            else { load(currentRange()); startAutoRefresh(); }
-          });
-        }
-
-        const initial = (location.hash || '#24h').replace(/^#/, '');
-        const valid = VALID_RANGES.includes(initial) ? initial : '24h';
-        if (select) select.value = valid;
-        load(valid);
-      })();
+      wireDashboard({
+        selectId: 'range-select',
+        checkboxId: 'auto-refresh',
+        load,
+        resize: true,  // uPlot doesn't auto-resize, so rebuild on viewport change
+      });
     </script>
   </body>
 </html>

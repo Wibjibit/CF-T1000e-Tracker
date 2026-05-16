@@ -29,7 +29,18 @@ export const POST: APIRoute = async ({ request, url }) => {
   const now = Date.now();
   const cutoff = now - RL_WINDOW_MS;
 
-  // Best-effort cleanup of old rows. Cheap because of the (ts) index.
+  // Parse the form first so a malformed body (no `code`) doesn't burn a
+  // rate-limit slot.
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    return redirect('/login?error=invalid', new Headers());
+  }
+  const code = (form.get('code') ?? '').toString().trim();
+  const returnTo = safeReturnTo((form.get('return_to') ?? '').toString());
+
+  // Best-effort cleanup of old rows. Cheap because of the (ip, ts) index.
   await env.DB.prepare(`DELETE FROM auth_attempts WHERE ts < ?`).bind(cutoff).run();
 
   const countRow = await env.DB.prepare(
@@ -46,16 +57,6 @@ export const POST: APIRoute = async ({ request, url }) => {
   // Record this attempt up-front so a flood of parallel requests can't all
   // squeak through under the limit.
   await env.DB.prepare(`INSERT INTO auth_attempts (ip, ts) VALUES (?, ?)`).bind(ip, now).run();
-
-  // Astro parses form bodies via request.formData() for application/x-www-form-urlencoded.
-  let form: FormData;
-  try {
-    form = await request.formData();
-  } catch {
-    return redirect('/login?error=invalid', new Headers());
-  }
-  const code = (form.get('code') ?? '').toString().trim();
-  const returnTo = safeReturnTo((form.get('return_to') ?? '').toString());
 
   const ok = await verifyTOTP(env.TOTP_SECRET, code, now);
   if (!ok) {

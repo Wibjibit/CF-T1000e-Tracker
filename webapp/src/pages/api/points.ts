@@ -79,8 +79,9 @@ export const GET: APIRoute = async ({ url }) => {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
-        // Phase 4 will gate this behind a session cookie; until then keep
-        // it un-cacheable so the map view is always fresh.
+        // Always un-cacheable: the map view should reflect new uplinks
+        // immediately, and this includes per-uplink RSSI/SNR/gateway
+        // metadata that callers should never see stale.
         'Cache-Control': 'no-store',
       },
     },
