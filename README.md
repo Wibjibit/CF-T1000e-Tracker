@@ -162,6 +162,8 @@ Running this stack at ~480 uplinks/day (the v10 cadence) sits comfortably inside
 
 - [Seeed-Studio](https://github.com/Seeed-Studio/Seeed-Tracker-T1000-E-for-LoRaWAN-dev-board) for the open-source T1000-E firmware base.
 - [Semtech](https://www.semtech.com/) for the LoRa Basics Modem (Clear BSD).
+- [Meshtastic](https://github.com/meshtastic/firmware) — their [`GPS.cpp`](https://github.com/meshtastic/firmware/blob/master/src/gps/GPS.cpp) and [T1000-E variant](https://github.com/meshtastic/firmware/blob/master/variants/nrf52840/tracker-t1000-e/variant.cpp) were the reference for the AG3335 `$PAIR066` / `$PAIR513` constellation-NVM init sequence, and for the firmware-mediated mag-tap-twice DFU entry approach that survives our LoRaWAN build.
+- [MeshCore](https://github.com/meshcore-dev/MeshCore) — their [T1000-E `target.cpp`](https://github.com/meshcore-dev/MeshCore/blob/main/variants/t1000-e/target.cpp) `start_gps()` was the reference for the hard-reset (vs RTC-pulse) GPS wake path that materially improved our fix quality.
 - [Astro](https://astro.build/), [Cloudflare](https://workers.cloudflare.com/), [Leaflet](https://leafletjs.com/), [uPlot](https://github.com/leeoniya/uPlot), and [OpenStreetMap](https://www.openstreetmap.org/) for everything that makes the dashboard tractable on a free tier.
 - [TTN Mapper](https://ttnmapper.org/) for a decade of LoRaWAN coverage mapping. The forwarder is generic so it can outlive any single downstream.
 
