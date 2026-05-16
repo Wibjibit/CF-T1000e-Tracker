@@ -3,6 +3,7 @@ dist/
 .astro/
 .wrangler/
 .dev.vars
+.dev.vars.bak
 *.log
 .DS_Store
 .env
