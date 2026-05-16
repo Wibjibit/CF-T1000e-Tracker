@@ -17,10 +17,15 @@ if (Astro.request.method === 'POST') {
     const form = await Astro.request.formData();
     const enabled = form.get('ttnmapper_enabled') === 'on';
     const url = (form.get('ttnmapper_url') ?? '').toString().trim();
+    const email = (form.get('ttnmapper_email') ?? '').toString().trim();
+    const experiment = (form.get('ttnmapper_experiment') ?? '').toString().trim();
+
     if (enabled && !/^https?:\/\//i.test(url)) {
       saveError = 'URL must start with http:// or https:// when forwarding is enabled.';
+    } else if (enabled && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      saveError = 'Email address is required when forwarding is enabled (TTN Mapper rejects requests without TTNMAPPERORG-USER).';
     } else {
-      await writeForwarderConfig(env.DB, { enabled, url });
+      await writeForwarderConfig(env.DB, { enabled, url, email, experiment });
       saved = true;
     }
   } catch (e) {
@@ -120,6 +125,26 @@ function statusBadge(status: number): { text: string; cls: string } {
             name="ttnmapper_url"
             value={config.url}
             placeholder="https://integrations.ttnmapper.org/tts/v3/uplink-message"
+          />
+        </div>
+        <div class="row">
+          <label for="ttnmapper_email">Email (sent as <code>TTNMAPPERORG-USER</code> header — required by TTN Mapper)</label>
+          <input
+            type="email"
+            id="ttnmapper_email"
+            name="ttnmapper_email"
+            value={config.email}
+            placeholder="you@example.com"
+          />
+        </div>
+        <div class="row">
+          <label for="ttnmapper_experiment">Experiment tag (optional, sent as <code>TTNMAPPERORG-EXPERIMENT</code>)</label>
+          <input
+            type="text"
+            id="ttnmapper_experiment"
+            name="ttnmapper_experiment"
+            value={config.experiment}
+            placeholder="leave blank for the main coverage map"
           />
         </div>
         <button type="submit">Save</button>

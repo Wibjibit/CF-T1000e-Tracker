@@ -73,16 +73,25 @@ async function forwardToTtnMapper(
   url: string,
   body: string,
   fCnt: number,
+  email: string,
+  experiment: string,
 ): Promise<void> {
   const started = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FORWARD_TIMEOUT_MS);
   let status = 0;
   let error: string | null = null;
+  // TTN Mapper's TTS v3 integration requires the contributor email in a
+  // TTNMAPPERORG-USER header (returns 403 "email address is empty" without it).
+  // TTNMAPPERORG-EXPERIMENT is optional; when set, traffic is tagged as test
+  // data and stays off the main coverage map.
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (email) headers['TTNMAPPERORG-USER'] = email;
+  if (experiment) headers['TTNMAPPERORG-EXPERIMENT'] = experiment;
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body,
       signal: controller.signal,
     });
@@ -221,7 +230,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     if (forwarder.enabled && forwarder.url) {
       const forwardBody = JSON.stringify(body);
       locals.cfContext.waitUntil(
-        forwardToTtnMapper(forwarder.url, forwardBody, fCnt),
+        forwardToTtnMapper(forwarder.url, forwardBody, fCnt, forwarder.email, forwarder.experiment),
       );
     }
   }

@@ -6,10 +6,16 @@
 
 export const FORWARDER_ENABLED_KEY = 'ttnmapper_enabled';
 export const FORWARDER_URL_KEY = 'ttnmapper_url';
+export const FORWARDER_EMAIL_KEY = 'ttnmapper_email';
+export const FORWARDER_EXPERIMENT_KEY = 'ttnmapper_experiment';
 
 export interface ForwarderConfig {
   enabled: boolean;
   url: string;
+  /** Sent as TTNMAPPERORG-USER header. Required by TTN Mapper's TTS v3 endpoint. */
+  email: string;
+  /** Sent as TTNMAPPERORG-EXPERIMENT header when non-empty. */
+  experiment: string;
 }
 
 interface SettingRow { value: string; }
@@ -31,13 +37,17 @@ async function writeSetting(db: D1Database, key: string, value: string): Promise
 }
 
 export async function readForwarderConfig(db: D1Database): Promise<ForwarderConfig> {
-  const [enabledStr, url] = await Promise.all([
+  const [enabledStr, url, email, experiment] = await Promise.all([
     readSetting(db, FORWARDER_ENABLED_KEY),
     readSetting(db, FORWARDER_URL_KEY),
+    readSetting(db, FORWARDER_EMAIL_KEY),
+    readSetting(db, FORWARDER_EXPERIMENT_KEY),
   ]);
   return {
     enabled: enabledStr === '1',
     url: url ?? '',
+    email: email ?? '',
+    experiment: experiment ?? '',
   };
 }
 
@@ -45,11 +55,13 @@ export async function writeForwarderConfig(
   db: D1Database,
   config: ForwarderConfig,
 ): Promise<void> {
-  // Two writes; not transactional but the keys are independent — if the
-  // second fails, the first still persists, which is the right partial-
-  // failure behaviour (a stale URL with a disabled toggle is harmless).
+  // Independent writes; if any one fails the others still persist. That's
+  // the right partial-failure behaviour — a stale email under a disabled
+  // toggle is harmless.
   await writeSetting(db, FORWARDER_ENABLED_KEY, config.enabled ? '1' : '0');
   await writeSetting(db, FORWARDER_URL_KEY, config.url);
+  await writeSetting(db, FORWARDER_EMAIL_KEY, config.email);
+  await writeSetting(db, FORWARDER_EXPERIMENT_KEY, config.experiment);
 }
 
 export interface ForwardLogRow {
