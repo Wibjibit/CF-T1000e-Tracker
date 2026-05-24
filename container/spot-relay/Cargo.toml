@@ -1,0 +1,23 @@
+[package]
+name = "spot-relay"
+version = "0.1.0"
+edition = "2021"
+
+# A generic Cloudflare-Container relay for Google `spot-pa` unary gRPC calls.
+# The only thing that can't run on Workers is the `te: trailers` HTTP/2 POST
+# (master-plan §1.5); everything else (token mint, EID/window/protobuf) is built
+# in the Worker, which hands this binary a fully-framed gRPC message + the method
+# path + a Spot token. Promoted from spike/rust-transport (VALIDATED end-to-end
+# on a deployed CF Container, 2026-05-23), generalised from the single hardcoded
+# GetEidInfo call to forward any frame/method.
+
+[dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "http2"] }
+tiny_http = "0.12"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+codegen-units = 1
+panic = "abort"

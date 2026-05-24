@@ -42,7 +42,11 @@ function buildDeviceMetadata(): Uint8Array {
   const idInfo = new PbWriter().int(2, 2 /* SPOT */).message(3, canonicIds).finish();
 
   const eus = new PbWriter().bytesField(1, new Uint8Array(60).fill(0xaa)).int(3, 1).finish();
-  const registration = new PbWriter().message(19, eus).string(21, '003200' /* MCU */).finish();
+  const registration = new PbWriter()
+    .message(19, eus)
+    .string(21, '003200' /* MCU */)
+    .int(23, 1_690_000_000 /* pairDate */)
+    .finish();
 
   // semantic recentLocation
   const sem = new PbWriter().string(1, 'Home').finish();
@@ -89,6 +93,7 @@ describe('parseDeviceUpdate', () => {
     expect(entry!.displayName).toBe('Backpack');
     expect(entry!.registration.isMcu).toBe(true);
     expect(entry!.registration.encryptedIdentityKey.length).toBe(60);
+    expect(entry!.registration.pairDate).toBe(1_690_000_000);
     expect(entry!.reports).toHaveLength(2);
 
     const net = entry!.reports[0];
@@ -121,6 +126,7 @@ describe('parseDevices (ListDevices response → registration + reports)', () =>
     expect(entries[0].canonicId).toBe('abc-canonic');
     expect(entries[0].registration.isMcu).toBe(true);
     expect(entries[0].registration.encryptedIdentityKey.length).toBe(60);
+    expect(entries[0].registration.pairDate).toBe(1_690_000_000);
     expect(entries[0].reports).toHaveLength(2);
   });
 

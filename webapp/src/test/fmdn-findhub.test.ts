@@ -164,8 +164,8 @@ describe('buildEikCache', () => {
     const flipped = sealed.map((b) => b ^ 0xff);
 
     const devices = [
-      { canonicId: 'good', registration: { encryptedIdentityKey: flipped, ownerKeyVersion: 1, isMcu: true } },
-      { canonicId: 'bad', registration: { encryptedIdentityKey: new Uint8Array(60).fill(5), ownerKeyVersion: 1, isMcu: true } },
+      { canonicId: 'good', registration: { encryptedIdentityKey: flipped, ownerKeyVersion: 1, isMcu: true, pairDate: 0 } },
+      { canonicId: 'bad', registration: { encryptedIdentityKey: new Uint8Array(60).fill(5), ownerKeyVersion: 1, isMcu: true, pairDate: 0 } },
     ];
     const { cache, failures } = buildEikCache(devices, ownerKey);
     expect(cache.size).toBe(1);

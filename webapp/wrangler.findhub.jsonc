@@ -32,14 +32,36 @@
     "enabled": true
   },
 
+  // */10 → kick the poller DO (READ path). 0 4 → static-EID liveness refresh
+  // (master-plan Phase 4). Both land in this worker's `scheduled` handler, which
+  // branches on `controller.cron`.
   "triggers": {
-    "crons": ["*/10 * * * *"]
+    "crons": ["*/10 * * * *", "0 4 * * *"]
   },
 
+  // The generic Spot gRPC relay (container/spot-relay, Rust). Containers can't
+  // bind D1 — this worker is the D1/creds side, the container is the `te:
+  // trailers` gRPC side (master-plan §1.5, Phase 4). `lite` + a short sleepAfter:
+  // cold-start + the daily unary call dominate the billed window.
+  "containers": [
+    {
+      "class_name": "SpotRelay",
+      "image": "../container/spot-relay/Dockerfile",
+      "max_instances": 1,
+      "instance_type": "lite"
+    }
+  ],
+
   "durable_objects": {
-    "bindings": [{ "name": "FINDHUB_POLLER", "class_name": "FindHubPoller" }]
+    "bindings": [
+      { "name": "FINDHUB_POLLER", "class_name": "FindHubPoller" },
+      { "name": "SPOT_RELAY", "class_name": "SpotRelay" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FindHubPoller"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["FindHubPoller"] },
+    { "tag": "v2", "new_sqlite_classes": ["SpotRelay"] }
+  ],
 
   // Same database as the site (wrangler.jsonc). migrations_dir is intentionally
   // omitted: schema migrations are owned by the site config, not this worker.

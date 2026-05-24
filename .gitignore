@@ -12,6 +12,11 @@ webapp/.wrangler/
 webapp/.dev.vars
 webapp/.dev.vars.bak
 webapp/test/d1-dump.txt
+webapp/scripts/out/
+
+# --- container/ artefacts ---
+# Rust build output for the Spot-relay container (built by wrangler/Docker).
+container/**/target/
 
 # --- firmware/ artefacts ---
 # Build outputs from SEGGER Embedded Studio

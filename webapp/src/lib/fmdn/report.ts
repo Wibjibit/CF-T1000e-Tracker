@@ -66,6 +66,9 @@ export interface DeviceRegistrationInfo {
   encryptedIdentityKey: Uint8Array;
   ownerKeyVersion: number;
   isMcu: boolean;
+  /** Unix seconds the device was paired. Anchors the Phase 4 EID-refresh
+   *  window (`get_next_eids` aligns buckets to this, not to 0). 0 if absent. */
+  pairDate: number;
 }
 
 /** A parsed DeviceMetadata (from a DeviceUpdate push or a ListDevices row). */
@@ -278,6 +281,7 @@ export function parseDeviceMetadata(md: Map<number, Field[]>): DeviceEntry | nul
     encryptedIdentityKey: getBytes(eus, 1) ?? new Uint8Array(0),
     ownerKeyVersion: getVarint(eus, 3) ?? 0,
     isMcu: fastPairModelId === MCU_FAST_PAIR_MODEL_ID,
+    pairDate: getVarint(registrationProto, 23) ?? 0, // DeviceRegistration.pairDate
   };
 
   // information(4).locationInformation(2).reports(3).recentLocationAndNetworkLocations(4)
