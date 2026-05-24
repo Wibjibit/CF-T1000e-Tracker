@@ -10,8 +10,8 @@ import {
   addSource,
   deleteAccount,
   SOURCE_TYPES,
-  type SourceType,
 } from '../lib/sources';
+import { SOURCE_LABELS, colorFor } from '../lib/sources-display';
 import { formatAgo } from '../lib/format';
 import Layout from '../layouts/Layout.astro';
 
@@ -89,13 +89,6 @@ function accountHealth(row: {
   if (row.last_refreshed_at) return { text: 'ok', cls: 'ok' };
   return { text: 'never used', cls: 'neutral' };
 }
-
-const SOURCE_LABELS: Record<SourceType, string> = {
-  lora: 'LoRaWAN',
-  findhub: 'Find Hub',
-  findmy: 'Apple Find My',
-  google_maps_sharing: 'Maps sharing',
-};
 ---
 <Layout title="Devices & Sources">
   <section class="page">
@@ -143,12 +136,9 @@ const SOURCE_LABELS: Record<SourceType, string> = {
 
       .empty { padding: 1.5rem; text-align: center; opacity: 0.55; font-size: 0.95rem; }
 
-      /* Source-type badges — colours match the map pin legend (map.astro). */
+      /* Source-type badges — colours come from sources-display.ts (colorFor),
+         applied inline so there's one source of truth shared with the map. */
       .src-badge { display: inline-block; padding: 0.05em 0.5em; border-radius: 0.3em; font-size: 0.78em; font-weight: 600; color: #fff; }
-      .src-badge.lora                { background: #3aaa3a; }   /* green */
-      .src-badge.findhub             { background: #1d68d0; }   /* blue (accent) */
-      .src-badge.findmy              { background: #e8730c; }   /* orange */
-      .src-badge.google_maps_sharing { background: #8a44d3; }   /* purple */
 
       .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
       .dim { opacity: 0.6; }
@@ -258,7 +248,7 @@ const SOURCE_LABELS: Record<SourceType, string> = {
                 <tbody>
                   {d.sources.map((s) => (
                     <tr>
-                      <td><span class={`src-badge ${s.source_type}`}>{SOURCE_LABELS[s.source_type]}</span></td>
+                      <td><span class="src-badge" style={`background:${colorFor(s.source_type)}`}>{SOURCE_LABELS[s.source_type]}</span></td>
                       <td><span class="ref mono">{s.source_ref}</span></td>
                       <td>{s.account_label ?? '—'}</td>
                       <td>

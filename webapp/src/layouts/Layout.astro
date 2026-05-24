@@ -199,6 +199,7 @@ const IconHamburger = `<svg viewBox="0 0 16 16" width="18" height="18" fill="non
           transform: translateX(-100%);
           transition: transform 0.2s ease;
           box-shadow: 4px 0 18px rgba(0,0,0,0.25);
+          background: Canvas;
         }
         /* On mobile the drawer is always full-width — ignore the
            collapsed flag so the rail state doesn't bleed in. */
@@ -308,7 +309,7 @@ const IconHamburger = `<svg viewBox="0 0 16 16" width="18" height="18" fill="non
             </a>
           </div>
           <div class="section">
-            <span class="label">Coverage</span>
+            <span class="label">LoRaWAN</span>
             <a href="/beams" class={isActive('/beams') ? 'active' : ''} title="Beams">
               <span class="icon" set:html={IconBeams}></span>
               <span class="link-label">Beams</span>

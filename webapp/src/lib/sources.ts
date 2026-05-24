@@ -5,14 +5,13 @@
 // request/response handling. NEVER select credentials_nonce or
 // credentials_ciphertext — credential material must never reach the page.
 
-/** The four mechanisms a device can be tracked through. Matches the
- *  device_sources.source_type CHECK constraint (migration 0009). */
-export const SOURCE_TYPES = ['lora', 'findhub', 'findmy', 'google_maps_sharing'] as const;
-export type SourceType = (typeof SOURCE_TYPES)[number];
+import { SOURCE_TYPES, isSourceType, type SourceType } from './sources-display';
 
-export function isSourceType(value: string): value is SourceType {
-  return (SOURCE_TYPES as readonly string[]).includes(value);
-}
+// The list of valid source types lives in sources-display.ts (the single
+// source of truth, safe for client bundles). Re-export here so existing
+// importers of '../lib/sources' keep working. Matches the
+// device_sources.source_type CHECK constraint (migration 0009).
+export { SOURCE_TYPES, isSourceType, type SourceType };
 
 // ── Accounts ────────────────────────────────────────────────────────────
 

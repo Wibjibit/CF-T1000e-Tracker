@@ -1,0 +1,20 @@
+# Line-ending policy. This repo is developed on Windows (core.autocrlf=true),
+# which would otherwise check text sources out as CRLF — and esbuild/vitest
+# choke on a CRLF + shebang `.mjs`. Pin web/text sources to LF in BOTH the repo
+# and the working tree so the toolchain (and cross-platform clones) always see
+# LF. Firmware C/C++ sources are intentionally not listed here (left to the
+# existing convention).
+*.mjs    text eol=lf
+*.cjs    text eol=lf
+*.js     text eol=lf
+*.ts     text eol=lf
+*.tsx    text eol=lf
+*.astro  text eol=lf
+*.json   text eol=lf
+*.jsonc  text eol=lf
+*.css    text eol=lf
+*.html   text eol=lf
+*.sql    text eol=lf
+*.md     text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf

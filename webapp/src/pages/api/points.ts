@@ -29,6 +29,13 @@ interface PointRow {
   rssi: number | null;
   snr: number | null;
   sf: number | null;
+  // Source-agnostic extras for the map's per-report pins + popups. accuracy_m
+  // is the position-accuracy column (Find Hub carries it; LoRa is null); `meta`
+  // is the verbatim source_metadata_json string so a popup can render EVERY key
+  // a source emits without this API hardcoding per-source fields. The flat
+  // columns above stay for the timeline charts (which read LoRa telemetry).
+  accuracy_m: number | null;
+  meta: string | null;
 }
 
 export const GET: APIRoute = async ({ url }) => {
@@ -82,6 +89,8 @@ export const GET: APIRoute = async ({ url }) => {
     SELECT received_at AS ts,
            device_id, source_type,
            latitude AS lat, longitude AS lon, altitude_m AS alt,
+           accuracy_m,
+           source_metadata_json AS meta,
            json_extract(source_metadata_json, '$.fix_quality')       AS fix,
            json_extract(source_metadata_json, '$.sats_tracked')      AS sats_tracked,
            json_extract(source_metadata_json, '$.sats_in_view')      AS sats_in_view,

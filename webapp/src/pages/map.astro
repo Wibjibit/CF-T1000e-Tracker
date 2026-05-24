@@ -1,7 +1,9 @@
 ---
 // Served via the Worker (not prerendered) so the auth middleware can gate it.
 // The HTML is content-free; all data is fetched client-side from /api/points
-// (which now reads the unified `reports` timeline) and /api/devices.
+// (the unified `reports` timeline) and /api/devices. Every located report is
+// drawn as its own clustered, clickable pin; a layer panel toggles each device
+// and source on/off; popups surface ALL metadata for the report behind the pin.
 import Layout from '../layouts/Layout.astro';
 export const prerender = false;
 ---
@@ -13,6 +15,20 @@ export const prerender = false;
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin="anonymous"
   />
+  <link
+    slot="head"
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"
+    integrity="sha256-YU3qCpj/P06tdPBJGPax0bm6Q1wltfwjsho5TR4+TYc="
+    crossorigin="anonymous"
+  />
+  <link
+    slot="head"
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"
+    integrity="sha256-YSWCMtmNZNwqex4CEw1nQhvFub2lmU7vcCKP+XVwwXA="
+    crossorigin="anonymous"
+  />
 
   <div class="page-bar">
     <h1>Map</h1>
@@ -21,11 +37,6 @@ export const prerender = false;
       <input type="checkbox" id="auto-refresh" />
       Auto-refresh
     </label>
-    <div class="ranges">
-      <select id="device-select" aria-label="Device">
-        <option value="">All devices</option>
-      </select>
-    </div>
     <div class="ranges">
       <select id="range-select" aria-label="Time range">
         <option value="1h">Last hour</option>
@@ -46,60 +57,58 @@ export const prerender = false;
     crossorigin="anonymous"
     is:inline
   ></script>
+  <script
+    src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"
+    integrity="sha256-Hk4dIpcqOSb0hZjgyvFOP+cEmDXUKKNE/tT542ZbNQg="
+    crossorigin="anonymous"
+    is:inline
+  ></script>
   <script>
     // @ts-nocheck
-    // Bundled by Astro. window.L (Leaflet) comes from the classic CDN
-    // <script> above; classic scripts run before module scripts so it's
-    // there by the time we execute. @ts-nocheck because Leaflet's runtime
-    // globals aren't typed in this project — the data flow into the page
-    // is exercised by the existing CI build + manual smoke tests.
-    import { wireDashboard, fetchDevices, populateDeviceSelect, deviceFromQuery } from '../scripts/dashboard';
-
-    // Pin colour by source_type (docs/architecture.md "UI"). Only 'lora' has
-    // data today; the rest are wired so adding a source later just lights up
-    // its colour + legend row with zero map changes.
-    const SOURCE_COLORS = {
-      lora: '#3aaa3a',                 // green
-      findhub: '#1d68d0',              // blue
-      findmy: '#e8730c',               // orange
-      google_maps_sharing: '#8a44d3',  // purple
-    };
-    const SOURCE_LABELS = {
-      lora: 'LoRaWAN',
-      findhub: 'Find Hub',
-      findmy: 'Apple Find My',
-      google_maps_sharing: 'Maps sharing',
-    };
-    const colorFor = (s) => SOURCE_COLORS[s] || '#888';
+    // Bundled by Astro. window.L (Leaflet) + L.markerClusterGroup come from the
+    // classic CDN <script>s above; classic scripts run before module scripts so
+    // they're there by the time we execute. @ts-nocheck because Leaflet's
+    // runtime globals aren't typed in this project.
+    import { wireDashboard, fetchDevices } from '../scripts/dashboard';
+    import { SOURCE_COLORS, SOURCE_LABELS, colorFor, labelFor } from '../lib/sources-display';
 
     const L = window.L;
-    const map = L.map('map', { zoomControl: true }).setView([52.5, -1.5], 6);
+    const map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([52.5, -1.5], 6);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
 
-    // Legend control (bottom-right). Hidden until a load reports which
-    // source_types are actually present in the current view.
-    const legend = L.control({ position: 'bottomright' });
-    legend.onAdd = () => L.DomUtil.create('div', 'pin-legend');
-    legend.addTo(map);
-    function renderLegend(sourceTypes) {
-      const el = document.querySelector('.pin-legend');
-      if (!el) return;
-      if (!sourceTypes.length) { el.innerHTML = ''; el.style.display = 'none'; return; }
-      el.style.display = 'block';
-      el.innerHTML = sourceTypes
-        .map((s) => `<div class="row"><span class="dot" style="background:${colorFor(s)}"></span>${SOURCE_LABELS[s] || s}</div>`)
-        .join('');
-    }
+    // One cluster group holds every visible pin; toggling rebuilds its contents.
+    const cluster = L.markerClusterGroup({
+      chunkedLoading: true,
+      maxClusterRadius: 50,
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+    }).addTo(map);
+    const trackLayer = L.layerGroup().addTo(map);
+
+    // ── state ────────────────────────────────────────────────────────────
+    let allPoints = []; // last fetch, chronological ASC (lat/lon non-null)
+    let truncated = false;
+    const deviceNames = {}; // device_id -> display name
+    const hiddenDevices = new Set(); // device_ids toggled OFF
+    const hiddenSources = new Set(); // source_types toggled OFF
+    let showTrack = true;
+    let fitted = false; // only auto-fit the view once
+    let accuracyCircle = null; // transient ring shown while a popup is open
 
     const statusEl = document.getElementById('status');
-    let polyline = null;
-    let currentMarker = null;
+    const setStatus = (m) => { if (statusEl) statusEl.innerHTML = m; };
 
-    const setStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
+    // ── helpers ──────────────────────────────────────────────────────────
+    const esc = (s) =>
+      String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+    function safeParse(s) {
+      if (!s) return {};
+      try { return JSON.parse(s) || {}; } catch { return {}; }
+    }
     function fmtAgo(ts) {
       const diff = Date.now() - ts;
       if (diff < 60_000) return Math.floor(diff / 1000) + 's ago';
@@ -107,85 +116,277 @@ export const prerender = false;
       if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + 'h ago';
       return Math.floor(diff / 86_400_000) + 'd ago';
     }
-
-    async function load(range, deviceId) {
-        setStatus('loading ' + range + '…');
-        let qs = '/api/points?range=' + encodeURIComponent(range) + '&with_fix=1';
-        if (deviceId) qs += '&device_id=' + encodeURIComponent(deviceId);
-        const res = await fetch(qs, { credentials: 'same-origin' });
-        if (!res.ok) {
-          setStatus('error: HTTP ' + res.status);
-          return;
-        }
-        const body = await res.json();
-        const points = body.points || [];
-
-        if (polyline) { map.removeLayer(polyline); polyline = null; }
-        if (currentMarker) { map.removeLayer(currentMarker); currentMarker = null; }
-
-        if (points.length === 0) {
-          renderLegend([]);
-          setStatus('no fixes in ' + range);
-          return;
-        }
-
-        // points is already chronological (ASC). Draw a track polyline coloured
-        // by the source if the whole track is one source, else a neutral grey.
-        const present = Array.from(new Set(points.map((p) => p.source_type)));
-        const coords = points.map((p) => [p.lat, p.lon]);
-        const trackColor = present.length === 1 ? colorFor(present[0]) : '#777';
-        polyline = L.polyline(coords, { color: trackColor, weight: 3, opacity: 0.8 }).addTo(map);
-
-        // Current position = last point, coloured by its source.
-        const last = points[points.length - 1];
-        currentMarker = L.circleMarker([last.lat, last.lon], {
-          radius: 7, color: '#fff', weight: 2,
-          fillColor: colorFor(last.source_type), fillOpacity: 1,
-        }).addTo(map);
-        currentMarker.bindPopup(
-          '<strong>Current</strong> (' + (SOURCE_LABELS[last.source_type] || last.source_type) + ')<br>' +
-            fmtAgo(last.ts) + '<br>' +
-            'Battery ' + (last.battery_pct ?? '?') + '% (' + (last.battery_mv ?? '?') + ' mV)<br>' +
-            'Temp ' + (last.temp_c ?? '?') + ' &deg;C, Lux ' + (last.lux_pct ?? '?') + '%',
-        );
-
-      renderLegend(present);
-      map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
-      setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + range + ')' + (body.truncated ? ' &mdash; truncated' : ''));
+    const humanize = (k) => k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    function fmtVal(k, v) {
+      if (typeof v === 'boolean') return v ? 'yes' : 'no';
+      if (typeof v === 'number' && !Number.isInteger(v)) return String(Math.round(v * 1000) / 1000);
+      return esc(v);
     }
 
-    // Populate the device selector from /api/devices, restoring the
-    // ?device= selection, then wire the dashboard (which fires the first load).
-    const deviceSelect = document.getElementById('device-select');
-    (async () => {
-      const devices = await fetchDevices();
-      if (deviceSelect) populateDeviceSelect(deviceSelect, devices, deviceFromQuery());
-      wireDashboard({
-        selectId: 'range-select',
-        checkboxId: 'auto-refresh',
-        deviceSelectId: 'device-select',
-        load,
+    function visiblePoints() {
+      return allPoints.filter((p) => !hiddenDevices.has(p.device_id) && !hiddenSources.has(p.source_type));
+    }
+
+    // Flatten a point to a single property bag (core + every metadata key) for
+    // both the popup and the GeoJSON/CSV export — source-agnostic by design.
+    function flatProps(p) {
+      const meta = safeParse(p.meta);
+      return {
+        time: new Date(p.ts).toISOString(),
+        device_id: p.device_id,
+        device_name: deviceNames[p.device_id] || p.device_id,
+        source_type: p.source_type,
+        lat: p.lat,
+        lon: p.lon,
+        altitude_m: p.alt,
+        accuracy_m: p.accuracy_m,
+        ...meta,
+      };
+    }
+
+    function popupHtml(p) {
+      const meta = safeParse(p.meta);
+      const name = deviceNames[p.device_id] || p.device_id;
+      const accuracy = p.accuracy_m != null ? ` &plusmn;${Math.round(p.accuracy_m)} m` : '';
+      let header =
+        `<div class="rp-h" style="border-left-color:${colorFor(p.source_type)}">` +
+        `<strong>${esc(labelFor(p.source_type))}</strong>` +
+        ` &middot; ${esc(name)}<br><span class="rp-sub">${new Date(p.ts).toLocaleString()} (${fmtAgo(p.ts)})</span></div>`;
+      const coords = `${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}`;
+      let core =
+        `<div class="rp-core">` +
+        `<div>${coords}${accuracy}</div>` +
+        (p.alt != null ? `<div>Altitude ${Math.round(p.alt)} m</div>` : '') +
+        `</div>`;
+      // Every metadata key the source emitted (skip nulls). is_own_report gets a
+      // friendly rendering; everything else is shown generically so new sources
+      // / new fields appear automatically.
+      const rows = Object.entries(meta)
+        .filter(([, v]) => v !== null && v !== undefined && v !== '')
+        .map(([k, v]) => {
+          if (k === 'is_own_report')
+            return `<tr><td>Report</td><td>${v ? 'own (device GPS)' : 'foreign (crowd-sourced)'}</td></tr>`;
+          return `<tr><td>${esc(humanize(k))}</td><td>${fmtVal(k, v)}</td></tr>`;
+        })
+        .join('');
+      const gmaps = `https://www.google.com/maps?q=${p.lat},${p.lon}`;
+      return (
+        `<div class="rp">${header}${core}` +
+        (rows ? `<table class="rp-t">${rows}</table>` : '') +
+        `<div class="rp-foot"><a href="${gmaps}" target="_blank" rel="noopener">Open in Google Maps &#8599;</a></div></div>`
+      );
+    }
+
+    function makeMarker(p) {
+      const color = colorFor(p.source_type);
+      // Find Hub distinguishes own (device GPS) from foreign (another phone saw
+      // the tag). Foreign fixes are less certain → render them lighter + dashed.
+      const meta = safeParse(p.meta);
+      const foreign = p.source_type === 'findhub' && meta.is_own_report === false;
+      const m = L.circleMarker([p.lat, p.lon], {
+        radius: 5,
+        color: '#fff',
+        weight: 1.5,
+        fillColor: color,
+        fillOpacity: foreign ? 0.4 : 0.95,
+        dashArray: foreign ? '2,3' : null,
       });
-    })();
+      m.bindPopup(() => popupHtml(p), { maxWidth: 340 });
+      m.on('popupopen', () => {
+        if (p.accuracy_m != null) {
+          accuracyCircle = L.circle([p.lat, p.lon], {
+            radius: p.accuracy_m, color, weight: 1, opacity: 0.5, fillOpacity: 0.08, interactive: false,
+          }).addTo(map);
+        }
+      });
+      m.on('popupclose', () => {
+        if (accuracyCircle) { map.removeLayer(accuracyCircle); accuracyCircle = null; }
+      });
+      return m;
+    }
+
+    function render() {
+      const pts = visiblePoints();
+      cluster.clearLayers();
+      cluster.addLayers(pts.map(makeMarker));
+
+      trackLayer.clearLayers();
+      if (showTrack) {
+        const byDev = {};
+        for (const p of pts) (byDev[p.device_id] ||= []).push([p.lat, p.lon]);
+        for (const dev in byDev) {
+          if (byDev[dev].length > 1)
+            L.polyline(byDev[dev], { color: '#777', weight: 2, opacity: 0.55, dashArray: '4,5' }).addTo(trackLayer);
+        }
+      }
+
+      const total = allPoints.length;
+      const shown = pts.length;
+      const label = shown === total ? `${total}` : `${shown}/${total}`;
+      setStatus(total === 0 ? 'no fixes in range' : `${label} report${total === 1 ? '' : 's'}${truncated ? ' &mdash; truncated' : ''}`);
+    }
+
+    function fitToVisible() {
+      const b = cluster.getBounds();
+      if (b && b.isValid()) { map.fitBounds(b, { padding: [40, 40] }); fitted = true; }
+    }
+
+    // ── layer panel (devices + sources + track + export) ──────────────────
+    const panel = L.control({ position: 'topright' });
+    panel.onAdd = () => {
+      const d = L.DomUtil.create('div', 'map-panel');
+      L.DomEvent.disableClickPropagation(d);
+      L.DomEvent.disableScrollPropagation(d);
+      return d;
+    };
+    panel.addTo(map);
+
+    function renderPanel() {
+      const el = document.querySelector('.map-panel');
+      if (!el) return;
+      const devs = {}; // device_id -> Set(source_type)
+      for (const p of allPoints) (devs[p.device_id] ||= new Set()).add(p.source_type);
+      const deviceIds = Object.keys(devs).sort();
+      const sources = Array.from(new Set(allPoints.map((p) => p.source_type))).sort();
+
+      if (deviceIds.length === 0) { el.innerHTML = ''; el.style.display = 'none'; return; }
+      el.style.display = 'block';
+
+      let html = '<div class="mp-sec">Devices</div>';
+      for (const dev of deviceIds) {
+        const checked = hiddenDevices.has(dev) ? '' : 'checked';
+        html += `<label class="mp-row"><input type="checkbox" data-dev="${esc(dev)}" ${checked}><span>${esc(deviceNames[dev] || dev)}</span></label>`;
+      }
+      html += '<div class="mp-sec">Sources</div>';
+      for (const s of sources) {
+        const checked = hiddenSources.has(s) ? '' : 'checked';
+        html += `<label class="mp-row"><input type="checkbox" data-src="${esc(s)}" ${checked}><span class="dot" style="background:${colorFor(s)}"></span><span>${esc(labelFor(s))}</span></label>`;
+      }
+      html += `<div class="mp-sep"></div><label class="mp-row"><input type="checkbox" id="mp-track" ${showTrack ? 'checked' : ''}><span>Track line</span></label>`;
+      html += `<div class="mp-exp"><button type="button" data-exp="geojson">GeoJSON</button><button type="button" data-exp="csv">CSV</button></div>`;
+      el.innerHTML = html;
+
+      el.querySelectorAll('input[data-dev]').forEach((i) =>
+        (i.onchange = () => { toggle(hiddenDevices, i.getAttribute('data-dev'), !i.checked); render(); }));
+      el.querySelectorAll('input[data-src]').forEach((i) =>
+        (i.onchange = () => { toggle(hiddenSources, i.getAttribute('data-src'), !i.checked); render(); }));
+      const trackBox = el.querySelector('#mp-track');
+      if (trackBox) trackBox.onchange = (e) => { showTrack = e.target.checked; render(); };
+      el.querySelectorAll('button[data-exp]').forEach((b) =>
+        (b.onclick = () => exportView(b.getAttribute('data-exp'))));
+    }
+    function toggle(set, key, off) { if (off) set.add(key); else set.delete(key); }
+
+    // ── export (current visible view) ─────────────────────────────────────
+    function download(blob, name) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 0);
+    }
+    function exportView(fmt) {
+      const pts = visiblePoints();
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      if (fmt === 'geojson') {
+        const fc = {
+          type: 'FeatureCollection',
+          features: pts.map((p) => ({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
+            properties: flatProps(p),
+          })),
+        };
+        download(new Blob([JSON.stringify(fc, null, 2)], { type: 'application/geo+json' }), `tracker-${stamp}.geojson`);
+      } else {
+        const rows = pts.map(flatProps);
+        const cols = Array.from(rows.reduce((s, r) => { Object.keys(r).forEach((k) => s.add(k)); return s; }, new Set()));
+        const cell = (v) => (v == null ? '' : /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v));
+        const csv = [cols.join(',')].concat(rows.map((r) => cols.map((c) => cell(r[c])).join(','))).join('\n');
+        download(new Blob([csv], { type: 'text/csv' }), `tracker-${stamp}.csv`);
+      }
+    }
+
+    // ── load ──────────────────────────────────────────────────────────────
+    let namesLoaded = false;
+    async function ensureNames() {
+      if (namesLoaded) return;
+      const devices = await fetchDevices();
+      for (const d of devices) deviceNames[d.device_id] = d.display_name;
+      namesLoaded = true;
+    }
+
+    async function load(range) {
+      setStatus('loading ' + range + '&hellip;');
+      let res;
+      try {
+        res = await fetch('/api/points?range=' + encodeURIComponent(range) + '&with_fix=1', { credentials: 'same-origin' });
+      } catch {
+        setStatus('network error');
+        return;
+      }
+      if (!res.ok) { setStatus('error: HTTP ' + res.status); return; }
+      const body = await res.json();
+      allPoints = body.points || [];
+      truncated = !!body.truncated;
+      await ensureNames();
+      renderPanel();
+      render();
+      if (!fitted) fitToVisible();
+    }
+
+    wireDashboard({ selectId: 'range-select', checkboxId: 'auto-refresh', load });
   </script>
 </Layout>
 
 <style>
   #map { flex: 1 1 auto; min-height: 0; }
 
-  /* Source-colour legend overlay (Leaflet control). */
-  :global(.pin-legend) {
-    background: rgba(255, 255, 255, 0.9);
+  /* ── Layer / export panel (Leaflet control, top-right) ───────────────── */
+  :global(.map-panel) {
+    background: rgba(255, 255, 255, 0.95);
     color: #222;
-    padding: 0.4rem 0.6rem;
-    border-radius: 0.4rem;
-    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
-    font-size: 0.8rem;
-    line-height: 1.5;
+    padding: 0.5rem 0.65rem;
+    border-radius: 0.45rem;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+    font-size: 0.82rem;
+    line-height: 1.4;
+    max-width: 15rem;
   }
-  :global(.pin-legend .row) { display: flex; align-items: center; gap: 0.4rem; }
-  :global(.pin-legend .dot) {
+  :global(.map-panel .mp-sec) {
+    font-weight: 700; font-size: 0.7rem; text-transform: uppercase;
+    letter-spacing: 0.05em; opacity: 0.6; margin: 0.3rem 0 0.15rem;
+  }
+  :global(.map-panel .mp-sec:first-child) { margin-top: 0; }
+  :global(.map-panel .mp-row) {
+    display: flex; align-items: center; gap: 0.4rem; cursor: pointer; padding: 0.1rem 0;
+  }
+  :global(.map-panel .mp-row input) { cursor: pointer; flex: 0 0 auto; margin: 0; }
+  :global(.map-panel .mp-row .dot) {
     width: 0.7rem; height: 0.7rem; border-radius: 50%;
     border: 1px solid rgba(0, 0, 0, 0.3); flex: 0 0 auto;
   }
+  :global(.map-panel .mp-sep) {
+    border-top: 1px solid rgba(0, 0, 0, 0.12); margin: 0.4rem 0 0.25rem;
+  }
+  :global(.map-panel .mp-exp) { display: flex; gap: 0.35rem; margin-top: 0.4rem; }
+  :global(.map-panel .mp-exp button) {
+    font: inherit; font-size: 0.78rem; padding: 0.2em 0.5em; cursor: pointer;
+    border: 1px solid rgba(0, 0, 0, 0.25); border-radius: 0.3em;
+    background: #f4f4f4; color: #222;
+  }
+  :global(.map-panel .mp-exp button:hover) { background: #e6e6e6; }
+
+  /* ── Report popup ────────────────────────────────────────────────────── */
+  :global(.rp) { font-size: 0.82rem; min-width: 12rem; }
+  :global(.rp .rp-h) { border-left: 3px solid #888; padding-left: 0.5rem; margin-bottom: 0.4rem; }
+  :global(.rp .rp-sub) { opacity: 0.7; font-size: 0.78rem; }
+  :global(.rp .rp-core) { margin-bottom: 0.4rem; }
+  :global(.rp .rp-t) { border-collapse: collapse; width: 100%; }
+  :global(.rp .rp-t td) {
+    padding: 0.1rem 0.4rem 0.1rem 0; vertical-align: top;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  }
+  :global(.rp .rp-t td:first-child) { opacity: 0.65; white-space: nowrap; }
+  :global(.rp .rp-foot) { margin-top: 0.45rem; }
 </style>
