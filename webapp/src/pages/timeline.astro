@@ -1,8 +1,17 @@
 ---
 // Served through the Worker (not prerendered) so the auth middleware gates it.
-// All data comes from /api/points client-side.
+// Two tabs: "Charts" (uPlot sensor charts — LoRa telemetry) and "Table" (an
+// all-sources chronological log; each row expands to every field, a map link,
+// a desktop mini-map, and collapsed raw-payload / per-gateway detail). All data
+// comes from /api/points client-side.
 import Layout from '../layouts/Layout.astro';
+import { env } from 'cloudflare:workers';
+import { readMapAppearance } from '../lib/settings';
 export const prerender = false;
+
+// Source colours (from /settings → Map appearance) so the table badges + mini-
+// map markers match the map. Injected into the bundle below.
+const appearance = await readMapAppearance(env.DB);
 ---
 <Layout title="T1000-E Tracker — timeline">
   <link
@@ -11,45 +20,87 @@ export const prerender = false;
     href="https://unpkg.com/uplot@1.6.32/dist/uPlot.min.css"
     crossorigin="anonymous"
   />
+  <link
+    slot="head"
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin="anonymous"
+  />
 
   <div class="page-bar">
     <h1>Timeline</h1>
     <span id="status" class="status">loading&hellip;</span>
-    <label class="auto-refresh" title="Re-fetch every 5 minutes">
-      <input type="checkbox" id="auto-refresh" />
-      Auto-refresh
-    </label>
-    <div class="ranges">
-      <select id="device-select" aria-label="Device">
-        <option value="">All devices</option>
-      </select>
-    </div>
-    <div class="ranges">
-      <select id="range-select" aria-label="Time range">
-        <option value="1h">Last hour</option>
-        <option value="6h">Last 6 hours</option>
-        <option value="24h" selected>Last 24 hours</option>
-        <option value="7d">Last 7 days</option>
-        <option value="30d">Last 30 days</option>
-        <option value="all">All time</option>
-      </select>
+    <div class="controls">
+      <label class="auto-refresh" title="Re-fetch every 5 minutes">
+        <input type="checkbox" id="auto-refresh" />
+        Auto-refresh
+      </label>
+      <div class="ranges">
+        <select id="device-select" aria-label="Device">
+          <option value="">All devices</option>
+        </select>
+      </div>
+      <div class="ranges">
+        <select id="range-select" aria-label="Time range">
+          <option value="1h">Last hour</option>
+          <option value="6h">Last 6 hours</option>
+          <option value="24h" selected>Last 24 hours</option>
+          <option value="7d">Last 7 days</option>
+          <option value="30d">Last 30 days</option>
+          <option value="all">All time</option>
+        </select>
+      </div>
     </div>
   </div>
 
-  <section class="charts">
-    <div class="chart-card"><h2>Battery <span class="latest" data-latest="battery_pct">&mdash;</span></h2><div class="chart" id="chart-battery"></div></div>
-    <div class="chart-card"><h2>Battery (mV) <span class="latest" data-latest="battery_mv">&mdash;</span></h2><div class="chart" id="chart-battery-mv"></div></div>
-    <div class="chart-card"><h2>Temperature (PCB) <span class="latest" data-latest="temp_c">&mdash;</span></h2><div class="chart" id="chart-temp"></div></div>
-    <div class="chart-card"><h2>Light <span class="latest" data-latest="lux_pct">&mdash;</span></h2><div class="chart" id="chart-lux"></div></div>
-    <div class="chart-card"><h2>RSSI <span class="latest" data-latest="rssi">&mdash;</span></h2><div class="chart" id="chart-rssi"></div></div>
-    <div class="chart-card"><h2>SNR <span class="latest" data-latest="snr">&mdash;</span></h2><div class="chart" id="chart-snr"></div></div>
-    <div class="chart-card"><h2>Spreading factor <span class="latest" data-latest="sf">&mdash;</span></h2><div class="chart" id="chart-sf"></div></div>
-    <div class="chart-card"><h2>Fix quality <span class="latest" data-latest="fix_quality">&mdash;</span></h2><div class="chart" id="chart-fix"></div></div>
-    <div class="chart-card"><h2>Sats tracked <span class="latest" data-latest="sats_tracked">&mdash;</span></h2><div class="chart" id="chart-sats-tracked"></div></div>
-    <div class="chart-card"><h2>Sats in view <span class="latest" data-latest="sats_in_view">&mdash;</span></h2><div class="chart" id="chart-sats-view"></div></div>
-    <div class="chart-card"><h2>HDOP <span class="latest" data-latest="hdop">&mdash;</span></h2><div class="chart" id="chart-hdop"></div></div>
-    <div class="chart-card"><h2>Speed <span class="latest" data-latest="speed">&mdash;</span></h2><div class="chart" id="chart-speed"></div></div>
-    <div class="chart-card motion-card"><h2>Motion <span class="latest" data-latest="motion_count">&mdash;</span></h2><div class="chart" id="chart-motion"></div></div>
+  <div class="tabbar" role="tablist">
+    <button id="tab-btn-charts" class="tab active" role="tab" aria-selected="true">Charts</button>
+    <button id="tab-btn-table" class="tab" role="tab" aria-selected="false">Table</button>
+  </div>
+
+  <section id="tab-charts" class="tab-panel">
+    <section class="charts">
+      <div class="chart-card"><h2>Battery <span class="latest" data-latest="battery_pct">&mdash;</span></h2><div class="chart" id="chart-battery"></div></div>
+      <div class="chart-card"><h2>Battery (mV) <span class="latest" data-latest="battery_mv">&mdash;</span></h2><div class="chart" id="chart-battery-mv"></div></div>
+      <div class="chart-card"><h2>Temperature (PCB) <span class="latest" data-latest="temp_c">&mdash;</span></h2><div class="chart" id="chart-temp"></div></div>
+      <div class="chart-card"><h2>Light <span class="latest" data-latest="lux_pct">&mdash;</span></h2><div class="chart" id="chart-lux"></div></div>
+      <div class="chart-card"><h2>RSSI <span class="latest" data-latest="rssi">&mdash;</span></h2><div class="chart" id="chart-rssi"></div></div>
+      <div class="chart-card"><h2>SNR <span class="latest" data-latest="snr">&mdash;</span></h2><div class="chart" id="chart-snr"></div></div>
+      <div class="chart-card"><h2>Spreading factor <span class="latest" data-latest="sf">&mdash;</span></h2><div class="chart" id="chart-sf"></div></div>
+      <div class="chart-card"><h2>Fix quality <span class="latest" data-latest="fix_quality">&mdash;</span></h2><div class="chart" id="chart-fix"></div></div>
+      <div class="chart-card"><h2>Sats tracked <span class="latest" data-latest="sats_tracked">&mdash;</span></h2><div class="chart" id="chart-sats-tracked"></div></div>
+      <div class="chart-card"><h2>Sats in view <span class="latest" data-latest="sats_in_view">&mdash;</span></h2><div class="chart" id="chart-sats-view"></div></div>
+      <div class="chart-card"><h2>HDOP <span class="latest" data-latest="hdop">&mdash;</span></h2><div class="chart" id="chart-hdop"></div></div>
+      <div class="chart-card"><h2>Speed <span class="latest" data-latest="speed">&mdash;</span></h2><div class="chart" id="chart-speed"></div></div>
+      <div class="chart-card motion-card"><h2>Motion <span class="latest" data-latest="motion_count">&mdash;</span></h2><div class="chart" id="chart-motion"></div></div>
+    </section>
+  </section>
+
+  <section id="tab-table" class="tab-panel" hidden>
+    <div class="table-wrap">
+      <div class="filters">
+        <fieldset class="src-filter">
+          <legend>Networks / sources</legend>
+          <div id="source-filter" class="src-checks"><!-- checkboxes injected --></div>
+        </fieldset>
+        <fieldset class="range-filter">
+          <legend>Custom range (overrides the preset)</legend>
+          <label>Start <input type="datetime-local" id="custom-start" /></label>
+          <label>End <input type="datetime-local" id="custom-end" /></label>
+          <button type="button" id="custom-clear" class="ghost">Clear</button>
+        </fieldset>
+      </div>
+      <div class="table-card">
+        <table id="data-table">
+          <thead>
+            <tr><th class="exp"></th><th>Time</th><th>Source</th><th>Device</th><th>Position</th></tr>
+          </thead>
+          <tbody id="data-tbody"></tbody>
+        </table>
+        <div id="table-empty" class="empty" hidden>No data in range.</div>
+      </div>
+    </div>
   </section>
 
   <script
@@ -57,241 +108,474 @@ export const prerender = false;
     crossorigin="anonymous"
     is:inline
   ></script>
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin="anonymous"
+    is:inline
+  ></script>
+  <script is:inline define:vars={{ appearance }}>
+    window.__APPEARANCE__ = appearance;
+  </script>
   <script>
     // @ts-nocheck
-    // Bundled by Astro. window.uPlot comes from the classic CDN <script>
-    // above; classic scripts run before module scripts so it's there by
-    // the time we execute. @ts-nocheck because uPlot's runtime globals
-    // aren't typed in this project.
+    // Bundled by Astro. window.uPlot + window.L come from the classic CDN
+    // <script>s above (classic scripts run before module scripts). @ts-nocheck
+    // because those runtime globals aren't typed in this project.
     import { wireDashboard, fetchDevices, populateDeviceSelect, deviceFromQuery } from '../scripts/dashboard';
+    import { SOURCE_LABELS, labelFor, colorFor as defaultColorFor, SOURCE_TYPES, DEFAULT_APPEARANCE } from '../lib/sources-display';
 
     const uPlot = window.uPlot;
-      const statusEl = document.getElementById('status');
-      const setStatus = (m) => { if (statusEl) statusEl.textContent = m; };
+    const L = window.L;
+    const APPEARANCE = window.__APPEARANCE__ && window.__APPEARANCE__.sources ? window.__APPEARANCE__ : DEFAULT_APPEARANCE;
+    const colorFor = (s) => APPEARANCE.sources[s] || defaultColorFor(s);
 
-      // uPlot draws axes on <canvas>; the 'currentColor' CSS keyword doesn't
-      // resolve inside canvas fillStyle so axis text would render as the
-      // canvas default (near-black) and disappear on dark themes. Read the
-      // body computed colour and pass it explicitly. Re-evaluated on each
-      // chart build so OS theme switches are picked up on the next reload.
-      const axisColor = getComputedStyle(document.body).color || '#888';
-      const gridColor = 'rgba(127,127,127,0.18)';
+    const statusEl = document.getElementById('status');
+    const setStatus = (m) => { if (statusEl) statusEl.textContent = m; };
 
-      // One uPlot per chart. Stored so we can destroy + recreate on range change.
-      const charts = {};
+    // ── shared helpers ─────────────────────────────────────────────────────
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    function fmtAgo(ts) {
+      const diff = Date.now() - ts;
+      if (diff < 60_000) return Math.floor(diff / 1000) + 's ago';
+      if (diff < 3_600_000) return Math.floor(diff / 60_000) + 'm ago';
+      if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + 'h ago';
+      return Math.floor(diff / 86_400_000) + 'd ago';
+    }
+    const humanize = (k) => k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    function safeParse(s) { if (!s) return {}; try { return JSON.parse(s) || {}; } catch { return {}; } }
 
-      function destroyAll() {
-        for (const k of Object.keys(charts)) {
-          try { charts[k].destroy(); } catch (e) { /* noop */ }
-          delete charts[k];
-        }
-      }
+    // ════════════════════════════════════════════════════════════════════════
+    // CHARTS tab (uPlot) — unchanged behaviour, just renamed to loadCharts.
+    // ════════════════════════════════════════════════════════════════════════
+    const axisColor = getComputedStyle(document.body).color || '#888';
+    const gridColor = 'rgba(127,127,127,0.18)';
+    const charts = {};
+    function destroyAll() {
+      for (const k of Object.keys(charts)) { try { charts[k].destroy(); } catch (e) { /* noop */ } delete charts[k]; }
+    }
+    function autoRange(values, opts) {
+      const o = opts || {};
+      const finite = values.filter((v) => v != null && Number.isFinite(v));
+      if (finite.length === 0) return [0, 1];
+      let lo = Math.min.apply(null, finite), hi = Math.max.apply(null, finite);
+      if (lo === hi) { lo -= 1; hi += 1; }
+      const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
+      if (o.min != null && lo < o.min) lo = o.min;
+      if (o.max != null && hi > o.max) hi = o.max;
+      return [lo, hi];
+    }
+    function makeChart(containerId, xs, ys, opts) {
+      const el = document.getElementById(containerId);
+      if (!el) return null;
+      el.innerHTML = '';
+      const width = el.clientWidth || 600, height = el.clientHeight || 130;
+      const unit = opts.unit || '', decimals = opts.decimals != null ? opts.decimals : 0;
+      const seriesOpts = Object.assign({
+        label: opts.label, stroke: opts.color || '#1d68d0', width: 1.5,
+        points: { show: xs.length < 200 },
+        value: (_, v) => v == null ? '—' : (opts.fmt ? opts.fmt(v) : v.toFixed(2)),
+        spanGaps: false,
+      }, opts.series || {});
+      if (opts.step && uPlot.paths && uPlot.paths.stepped) seriesOpts.paths = uPlot.paths.stepped({ align: 1 });
+      const series = [{}, seriesOpts];
+      const range = autoRange(ys, opts);
+      const tickCount = opts.tickCount || 5;
+      const fixedSplits = opts.splits;
+      const ySplits = fixedSplits ? () => fixedSplits : (_, axisIdx, scaleMin, scaleMax) => {
+        const out = []; const step = (scaleMax - scaleMin) / (tickCount - 1);
+        for (let i = 0; i < tickCount; i++) out.push(scaleMin + i * step);
+        return out;
+      };
+      const yValues = (_, splits) => splits.map((v) => {
+        if (v == null || !Number.isFinite(v)) return '';
+        const s = decimals > 0 ? v.toFixed(decimals) : Math.round(v).toString();
+        return s + unit;
+      });
+      const config = {
+        width, height, series,
+        scales: { y: { range: () => range } },
+        axes: [
+          { stroke: axisColor, grid: { stroke: gridColor } },
+          { stroke: axisColor, grid: { stroke: gridColor }, size: 60, splits: ySplits, values: yValues },
+        ],
+        legend: { show: false }, cursor: { y: false },
+      };
+      return new uPlot(config, [xs, ys], el);
+    }
+    function makeMotionChart(xs, motionVals) {
+      const el = document.getElementById('chart-motion');
+      if (!el) return null;
+      el.innerHTML = '';
+      const width = el.clientWidth || 600, height = el.clientHeight || 60;
+      return new uPlot({
+        width, height,
+        series: [{}, {
+          label: 'motion', stroke: 'orange', fill: 'rgba(255,165,0,0.45)',
+          paths: uPlot.paths.bars && uPlot.paths.bars({ size: [0.6] }),
+          value: (_, v) => v === 1 ? 'yes' : 'no',
+        }],
+        scales: { y: { range: () => [0, 1.1] } },
+        axes: [
+          { stroke: axisColor, grid: { stroke: gridColor } },
+          { stroke: axisColor, grid: { stroke: gridColor }, size: 50, values: (_, splits) => splits.map((v) => v === 0 ? '' : v === 1 ? '✓' : '') },
+        ],
+        legend: { show: false }, cursor: { y: false },
+      }, [xs, motionVals], el);
+    }
+    function setLatest(key, text) { const el = document.querySelector(`[data-latest="${key}"]`); if (el) el.textContent = text; }
 
-      // Pick a reasonable y-range so flat data doesn't render as a zero-line.
-      function autoRange(values, opts) {
-        const o = opts || {};
-        const finite = values.filter((v) => v != null && Number.isFinite(v));
-        if (finite.length === 0) return [0, 1];
-        let lo = Math.min.apply(null, finite);
-        let hi = Math.max.apply(null, finite);
-        if (lo === hi) { lo -= 1; hi += 1; }
-        const pad = (hi - lo) * 0.1;
-        lo -= pad; hi += pad;
-        if (o.min != null && lo < o.min) lo = o.min;
-        if (o.max != null && hi > o.max) hi = o.max;
-        return [lo, hi];
-      }
-
-      function makeChart(containerId, xs, ys, opts) {
-        const el = document.getElementById(containerId);
-        if (!el) return null;
-        el.innerHTML = '';
-        const width = el.clientWidth || 600;
-        const height = el.clientHeight || 130;
-        const unit = opts.unit || '';
-        const decimals = opts.decimals != null ? opts.decimals : 0;
-        const seriesOpts = Object.assign({
-          label: opts.label,
-          stroke: opts.color || '#1d68d0',
-          width: 1.5,
-          points: { show: xs.length < 200 },
-          value: (_, v) => v == null ? '—' : (opts.fmt ? opts.fmt(v) : v.toFixed(2)),
-          spanGaps: false,
-        }, opts.series || {});
-        if (opts.step && uPlot.paths && uPlot.paths.stepped) {
-          seriesOpts.paths = uPlot.paths.stepped({ align: 1 });
-        }
-        const series = [{}, seriesOpts];
-        const range = autoRange(ys, opts);
-        // Force ~5 evenly spaced y-axis ticks. uPlot's default picker leans
-        // minimalist for short charts (1-2 ticks); we want enough gridlines
-        // that the eye can interpolate values without guessing. Charts can
-        // override with a hand-picked splits array for integer-valued data.
-        const tickCount = opts.tickCount || 5;
-        const fixedSplits = opts.splits;
-        const ySplits = fixedSplits
-          ? () => fixedSplits
-          : (_, axisIdx, scaleMin, scaleMax) => {
-              const out = [];
-              const step = (scaleMax - scaleMin) / (tickCount - 1);
-              for (let i = 0; i < tickCount; i++) out.push(scaleMin + i * step);
-              return out;
-            };
-        // y-axis tick formatter: append unit so each gridline is self-describing.
-        const yValues = (_, splits) => splits.map((v) => {
-          if (v == null || !Number.isFinite(v)) return '';
-          const s = decimals > 0 ? v.toFixed(decimals) : Math.round(v).toString();
-          return s + unit;
-        });
-        const config = {
-          width, height, series,
-          scales: { y: { range: () => range } },
-          axes: [
-            { stroke: axisColor, grid: { stroke: gridColor } },
-            {
-              stroke: axisColor,
-              grid: { stroke: gridColor },
-              size: 60,
-              splits: ySplits,
-              values: yValues,
-            },
-          ],
-          legend: { show: false },
-          cursor: { y: false },
-        };
-        return new uPlot(config, [xs, ys], el);
-      }
-
-      function makeMotionChart(xs, motionVals) {
-        const el = document.getElementById('chart-motion');
-        if (!el) return null;
-        el.innerHTML = '';
-        const width = el.clientWidth || 600;
-        const height = el.clientHeight || 60;
-        return new uPlot({
-          width, height,
-          series: [
-            {},
-            {
-              label: 'motion',
-              stroke: 'orange',
-              fill: 'rgba(255,165,0,0.45)',
-              paths: uPlot.paths.bars && uPlot.paths.bars({ size: [0.6] }),
-              value: (_, v) => v === 1 ? 'yes' : 'no',
-            },
-          ],
-          scales: { y: { range: () => [0, 1.1] } },
-          axes: [
-            { stroke: axisColor, grid: { stroke: gridColor } },
-            { stroke: axisColor, grid: { stroke: gridColor }, size: 50, values: (_, splits) => splits.map((v) => v === 0 ? '' : v === 1 ? '✓' : '') },
-          ],
-          legend: { show: false },
-          cursor: { y: false },
-        }, [xs, motionVals], el);
-      }
-
-      function setLatest(key, text) {
-        const el = document.querySelector(`[data-latest="${key}"]`);
-        if (el) el.textContent = text;
-      }
-
-      async function load(range, deviceId) {
-        setStatus('loading ' + range + '…');
-        destroyAll();
-        let body;
-        try {
-          let qs = '/api/points?range=' + encodeURIComponent(range);
-          if (deviceId) qs += '&device_id=' + encodeURIComponent(deviceId);
-          const res = await fetch(qs, { credentials: 'same-origin' });
-          if (!res.ok) { setStatus('error: HTTP ' + res.status); return; }
-          body = await res.json();
-        } catch (e) {
-          setStatus('error: ' + e.message);
-          return;
-        }
-        const points = body.points || [];
-        if (points.length === 0) {
-          setStatus('no data in ' + range);
-          return;
-        }
-
-        // uPlot wants seconds, our ts is ms.
-        const xs = points.map((p) => p.ts / 1000);
-
-        const batteryPct = points.map((p) => p.battery_pct);
-        const batteryMv  = points.map((p) => p.battery_mv);
-        const tempC      = points.map((p) => p.temp_c);
-        const luxPct     = points.map((p) => p.lux_pct);
-        const rssi       = points.map((p) => p.rssi);
-        const snr        = points.map((p) => p.snr);
-        const sf         = points.map((p) => p.sf);
-        const fixQuality = points.map((p) => p.fix);
-        const satsTracked = points.map((p) => p.sats_tracked);
-        const satsInView  = points.map((p) => p.sats_in_view);
-        const hdop       = points.map((p) => p.hdop);
-        const speed      = points.map((p) => p.speed);
-        const motion     = points.map((p) => p.motion ? 1 : 0);
-
-        const fixLabel = (v) => {
-          const i = Math.round(v);
-          return i === 0 ? '0 invalid' : i === 1 ? '1 GPS' : i === 2 ? '2 DGPS' : String(i);
-        };
-
-        charts.battery   = makeChart('chart-battery',    xs, batteryPct, { label: 'battery %', color: '#3aaa3a', min: 0, max: 100, unit: '%',     decimals: 0, fmt: (v) => v.toFixed(0) + '%' });
-        charts.batteryMv = makeChart('chart-battery-mv', xs, batteryMv,  { label: 'mV',        color: '#2a8d2a',                  unit: ' mV',   decimals: 0, fmt: (v) => v.toFixed(0) + ' mV' });
-        charts.temp      = makeChart('chart-temp',       xs, tempC,      { label: '°C',        color: '#c33',                     unit: ' °C',   decimals: 1, fmt: (v) => v.toFixed(1) + ' °C' });
-        charts.lux       = makeChart('chart-lux',        xs, luxPct,     { label: 'light %',   color: '#d4a017', min: 0, max: 100, unit: '%',     decimals: 0, fmt: (v) => v.toFixed(0) + '%' });
-        charts.rssi      = makeChart('chart-rssi',       xs, rssi,       { label: 'dBm',       color: '#1d68d0',                  unit: ' dBm',  decimals: 0, fmt: (v) => v.toFixed(0) + ' dBm' });
-        charts.snr       = makeChart('chart-snr',        xs, snr,        { label: 'dB',        color: '#8a44d3',                  unit: ' dB',   decimals: 1, fmt: (v) => v.toFixed(1) + ' dB' });
-        // SF is integer-valued (7..12); step plotting + integer-only ticks at exactly SF7..SF12.
-        charts.sf        = makeChart('chart-sf',         xs, sf,         { label: 'SF', color: '#0d7c7c', min: 6.5, max: 12.5, unit: '', decimals: 0, step: true, splits: [7, 8, 9, 10, 11, 12], fmt: (v) => 'SF' + Math.round(v) });
-        // Fix quality: 0=invalid, 1=GPS, 2=DGPS. Discrete; step plot.
-        charts.fix       = makeChart('chart-fix',        xs, fixQuality, { label: 'fix', color: '#7c3a8b', min: -0.2, max: 2.2, unit: '', decimals: 0, step: true, splits: [0, 1, 2], fmt: fixLabel });
-        charts.satsTracked = makeChart('chart-sats-tracked', xs, satsTracked, { label: 'sats', color: '#1d68d0', min: 0, unit: '', decimals: 0, fmt: (v) => v.toFixed(0) });
-        charts.satsInView  = makeChart('chart-sats-view',    xs, satsInView,  { label: 'sats', color: '#1d68d0', min: 0, unit: '', decimals: 0, fmt: (v) => v.toFixed(0) });
-        charts.hdop      = makeChart('chart-hdop',       xs, hdop,       { label: 'HDOP', color: '#c33', min: 0, unit: '', decimals: 1, fmt: (v) => v.toFixed(2) });
-        charts.speed     = makeChart('chart-speed',      xs, speed,      { label: 'km/h', color: '#3aaa3a', min: 0, unit: ' km/h', decimals: 0, fmt: (v) => v.toFixed(0) + ' km/h' });
-        charts.motion    = makeMotionChart(xs, motion);
-
-        // Latest values in the card headers.
-        const last = points[points.length - 1];
-        const fmt = (v, suffix) => v == null ? '—' : (typeof v === 'number' ? v : Number(v)) + suffix;
-        setLatest('battery_pct', fmt(last.battery_pct, '%'));
-        setLatest('battery_mv',  fmt(last.battery_mv,  ' mV'));
-        setLatest('temp_c',      last.temp_c == null ? '—' : last.temp_c.toFixed(2) + ' °C');
-        setLatest('lux_pct',     fmt(last.lux_pct, '%'));
-        setLatest('rssi',        fmt(last.rssi,   ' dBm'));
-        setLatest('snr',         last.snr == null ? '—' : last.snr.toFixed(1) + ' dB');
-        setLatest('sf',          last.sf == null ? '—' : 'SF' + last.sf);
-        setLatest('fix_quality', last.fix == null ? '—' : fixLabel(last.fix));
-        setLatest('sats_tracked', last.sats_tracked == null ? '—' : String(last.sats_tracked));
-        setLatest('sats_in_view', last.sats_in_view == null ? '—' : String(last.sats_in_view));
-        setLatest('hdop',        last.hdop == null ? '—' : last.hdop.toFixed(2));
-        setLatest('speed',       last.speed == null ? '—' : last.speed + ' km/h');
-        const motionCount = motion.reduce((a, b) => a + b, 0);
-        setLatest('motion_count', motionCount + ' of ' + points.length);
-
+    async function loadCharts(range, deviceId) {
+      setStatus('loading ' + range + '…');
+      destroyAll();
+      let body;
+      try {
+        let qs = '/api/points?range=' + encodeURIComponent(range);
+        if (deviceId) qs += '&device_id=' + encodeURIComponent(deviceId);
+        const res = await fetch(qs, { credentials: 'same-origin' });
+        if (!res.ok) { setStatus('error: HTTP ' + res.status); return; }
+        body = await res.json();
+      } catch (e) { setStatus('error: ' + e.message); return; }
+      const points = body.points || [];
+      if (points.length === 0) { setStatus('no data in ' + range); return; }
+      const xs = points.map((p) => p.ts / 1000);
+      const batteryPct = points.map((p) => p.battery_pct);
+      const batteryMv  = points.map((p) => p.battery_mv);
+      const tempC      = points.map((p) => p.temp_c);
+      const luxPct     = points.map((p) => p.lux_pct);
+      const rssi       = points.map((p) => p.rssi);
+      const snr        = points.map((p) => p.snr);
+      const sf         = points.map((p) => p.sf);
+      const fixQuality = points.map((p) => p.fix);
+      const satsTracked = points.map((p) => p.sats_tracked);
+      const satsInView  = points.map((p) => p.sats_in_view);
+      const hdop       = points.map((p) => p.hdop);
+      const speed      = points.map((p) => p.speed);
+      const motion     = points.map((p) => p.motion ? 1 : 0);
+      const fixLabel = (v) => { const i = Math.round(v); return i === 0 ? '0 invalid' : i === 1 ? '1 GPS' : i === 2 ? '2 DGPS' : String(i); };
+      charts.battery   = makeChart('chart-battery',    xs, batteryPct, { label: 'battery %', color: '#3aaa3a', min: 0, max: 100, unit: '%',     decimals: 0, fmt: (v) => v.toFixed(0) + '%' });
+      charts.batteryMv = makeChart('chart-battery-mv', xs, batteryMv,  { label: 'mV',        color: '#2a8d2a',                  unit: ' mV',   decimals: 0, fmt: (v) => v.toFixed(0) + ' mV' });
+      charts.temp      = makeChart('chart-temp',       xs, tempC,      { label: '°C',        color: '#c33',                     unit: ' °C',   decimals: 1, fmt: (v) => v.toFixed(1) + ' °C' });
+      charts.lux       = makeChart('chart-lux',        xs, luxPct,     { label: 'light %',   color: '#d4a017', min: 0, max: 100, unit: '%',     decimals: 0, fmt: (v) => v.toFixed(0) + '%' });
+      charts.rssi      = makeChart('chart-rssi',       xs, rssi,       { label: 'dBm',       color: '#1d68d0',                  unit: ' dBm',  decimals: 0, fmt: (v) => v.toFixed(0) + ' dBm' });
+      charts.snr       = makeChart('chart-snr',        xs, snr,        { label: 'dB',        color: '#8a44d3',                  unit: ' dB',   decimals: 1, fmt: (v) => v.toFixed(1) + ' dB' });
+      charts.sf        = makeChart('chart-sf',         xs, sf,         { label: 'SF', color: '#0d7c7c', min: 6.5, max: 12.5, unit: '', decimals: 0, step: true, splits: [7, 8, 9, 10, 11, 12], fmt: (v) => 'SF' + Math.round(v) });
+      charts.fix       = makeChart('chart-fix',        xs, fixQuality, { label: 'fix', color: '#7c3a8b', min: -0.2, max: 2.2, unit: '', decimals: 0, step: true, splits: [0, 1, 2], fmt: fixLabel });
+      charts.satsTracked = makeChart('chart-sats-tracked', xs, satsTracked, { label: 'sats', color: '#1d68d0', min: 0, unit: '', decimals: 0, fmt: (v) => v.toFixed(0) });
+      charts.satsInView  = makeChart('chart-sats-view',    xs, satsInView,  { label: 'sats', color: '#1d68d0', min: 0, unit: '', decimals: 0, fmt: (v) => v.toFixed(0) });
+      charts.hdop      = makeChart('chart-hdop',       xs, hdop,       { label: 'HDOP', color: '#c33', min: 0, unit: '', decimals: 1, fmt: (v) => v.toFixed(2) });
+      charts.speed     = makeChart('chart-speed',      xs, speed,      { label: 'km/h', color: '#3aaa3a', min: 0, unit: ' km/h', decimals: 0, fmt: (v) => v.toFixed(0) + ' km/h' });
+      charts.motion    = makeMotionChart(xs, motion);
+      const last = points[points.length - 1];
+      const fmt = (v, suffix) => v == null ? '—' : (typeof v === 'number' ? v : Number(v)) + suffix;
+      setLatest('battery_pct', fmt(last.battery_pct, '%'));
+      setLatest('battery_mv',  fmt(last.battery_mv,  ' mV'));
+      setLatest('temp_c',      last.temp_c == null ? '—' : last.temp_c.toFixed(2) + ' °C');
+      setLatest('lux_pct',     fmt(last.lux_pct, '%'));
+      setLatest('rssi',        fmt(last.rssi,   ' dBm'));
+      setLatest('snr',         last.snr == null ? '—' : last.snr.toFixed(1) + ' dB');
+      setLatest('sf',          last.sf == null ? '—' : 'SF' + last.sf);
+      setLatest('fix_quality', last.fix == null ? '—' : fixLabel(last.fix));
+      setLatest('sats_tracked', last.sats_tracked == null ? '—' : String(last.sats_tracked));
+      setLatest('sats_in_view', last.sats_in_view == null ? '—' : String(last.sats_in_view));
+      setLatest('hdop',        last.hdop == null ? '—' : last.hdop.toFixed(2));
+      setLatest('speed',       last.speed == null ? '—' : last.speed + ' km/h');
+      const motionCount = motion.reduce((a, b) => a + b, 0);
+      setLatest('motion_count', motionCount + ' of ' + points.length);
       setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + range + ')' + (body.truncated ? ' — truncated' : ''));
     }
 
-    // Populate the device selector from /api/devices, restoring the ?device=
-    // selection, then wire the dashboard (which fires the first load).
+    // ════════════════════════════════════════════════════════════════════════
+    // TABLE tab — all-sources chronological log with expandable detail.
+    // ════════════════════════════════════════════════════════════════════════
+    const tbody = document.getElementById('data-tbody');
+    const tableEmpty = document.getElementById('table-empty');
+    const sourceFilterEl = document.getElementById('source-filter');
+    const customStartEl = document.getElementById('custom-start');
+    const customEndEl = document.getElementById('custom-end');
+    const desktopMq = window.matchMedia('(min-width: 820px)');
+    let deviceNames = {}; // device_id -> display name
+
+    function selectedSources() {
+      return Array.from(sourceFilterEl.querySelectorAll('input:checked')).map((i) => i.value);
+    }
+    // datetime-local value (local, naive) -> epoch ms, or null if blank.
+    function localToMs(v) { if (!v) return null; const t = new Date(v).getTime(); return Number.isFinite(t) ? t : null; }
+
+    function buildSourceFilter(devices) {
+      // Show only the source types actually present across devices.
+      const present = new Set();
+      for (const d of devices) for (const s of (d.source_types || [])) present.add(s);
+      const types = SOURCE_TYPES.filter((t) => present.has(t));
+      sourceFilterEl.innerHTML = '';
+      if (types.length <= 1) { sourceFilterEl.parentElement.hidden = true; return; }
+      for (const t of types) {
+        const id = 'src-' + t;
+        const wrap = document.createElement('label');
+        wrap.className = 'src-check';
+        wrap.innerHTML = `<input type="checkbox" id="${id}" value="${t}" checked>`
+          + `<span class="dot" style="background:${colorFor(t)}"></span>${esc(SOURCE_LABELS[t] || t)}`;
+        sourceFilterEl.appendChild(wrap);
+      }
+      sourceFilterEl.addEventListener('change', () => controller && controller.refresh());
+    }
+
+    function positionCell(p) {
+      if (p.lat == null || p.lon == null) return '<span class="muted">no fix</span>';
+      const home = p.pinned ? ' <span class="home-tag" title="No GPS fix — pinned to Home">&#8962; Home</span>' : '';
+      return `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}${home}`;
+    }
+
+    async function loadTable(range, deviceId) {
+      setStatus('loading…');
+      let body;
+      try {
+        const startMs = localToMs(customStartEl.value);
+        const endMs = localToMs(customEndEl.value);
+        let qs = '/api/points?';
+        if (startMs != null || endMs != null) {
+          qs += 'since=' + (startMs != null ? startMs : 0) + '&until=' + (endMs != null ? endMs : Date.now());
+        } else {
+          qs += 'range=' + encodeURIComponent(range);
+        }
+        if (deviceId) qs += '&device_id=' + encodeURIComponent(deviceId);
+        const srcs = selectedSources();
+        if (srcs.length) qs += '&source_type=' + encodeURIComponent(srcs.join(','));
+        const res = await fetch(qs, { credentials: 'same-origin' });
+        if (!res.ok) { setStatus('error: HTTP ' + res.status); return; }
+        body = await res.json();
+      } catch (e) { setStatus('error: ' + e.message); return; }
+
+      // API returns ASC; the log wants most-recent first.
+      const points = (body.points || []).slice().reverse();
+      tbody.innerHTML = '';
+      tableEmpty.hidden = points.length > 0;
+      for (const p of points) {
+        const tr = document.createElement('tr');
+        tr.className = 'data-row';
+        const when = new Date(p.ts);
+        tr.innerHTML =
+          `<td class="exp"><span class="chev">▸</span></td>` +
+          `<td title="${esc(when.toString())}">${esc(when.toLocaleString())}<div class="ago">${fmtAgo(p.ts)}</div></td>` +
+          `<td><span class="src-badge" style="background:${colorFor(p.source_type)}">${esc(labelFor(p.source_type))}</span></td>` +
+          `<td>${esc(deviceNames[p.device_id] || p.device_id)}</td>` +
+          `<td class="pos">${positionCell(p)}</td>`;
+        const detail = document.createElement('tr');
+        detail.className = 'detail-row';
+        detail.hidden = true;
+        detail.innerHTML = `<td></td><td colspan="4"><div class="detail"></div></td>`;
+        tr.addEventListener('click', () => toggleDetail(tr, detail, p));
+        tbody.appendChild(tr);
+        tbody.appendChild(detail);
+      }
+      setStatus(points.length + ' row' + (points.length === 1 ? '' : 's') + (body.truncated ? ' — truncated' : ''));
+    }
+
+    function toggleDetail(tr, detail, p) {
+      const opening = detail.hidden;
+      detail.hidden = !opening;
+      tr.classList.toggle('open', opening);
+      const chev = tr.querySelector('.chev');
+      if (chev) chev.textContent = opening ? '▾' : '▸';
+      if (opening && !detail.dataset.built) {
+        buildDetail(detail.querySelector('.detail'), p);
+        detail.dataset.built = '1';
+      }
+    }
+
+    // Metadata fields grouped into meaningful sections + formatted with units,
+    // so the expanded pane reads as an instrument panel rather than a key dump.
+    const FIX_LABEL = { 0: 'invalid', 1: 'GPS', 2: 'DGPS' };
+    const FIELD_LABELS = {
+      battery_pct: 'Battery', battery_mv: 'Battery (mV)', temp_c: 'Temperature', lux_pct: 'Light',
+      motion: 'Motion', fix_quality: 'Fix quality', sats_tracked: 'Sats tracked', sats_in_view: 'Sats in view',
+      hdop: 'HDOP', speed_kmh: 'Speed', rssi: 'RSSI', snr: 'SNR', spreading_factor: 'Spreading factor',
+      gateway_id: 'Best gateway', f_cnt: 'Frame counter', status: 'Status', is_own_report: 'Own report',
+      owner_key_version: 'Owner key ver.', semantic_label: 'Semantic label',
+    };
+    const FIELD_GROUPS = [
+      { title: 'Battery & environment', keys: ['battery_pct', 'battery_mv', 'temp_c', 'lux_pct'] },
+      { title: 'Motion', keys: ['motion'] },
+      { title: 'GPS', keys: ['fix_quality', 'sats_tracked', 'sats_in_view', 'hdop', 'speed_kmh'] },
+      { title: 'Radio (LoRaWAN)', keys: ['rssi', 'snr', 'spreading_factor', 'gateway_id', 'f_cnt'] },
+      { title: 'Find Hub', keys: ['status', 'is_own_report', 'owner_key_version', 'semantic_label'] },
+    ];
+    function fmtField(key, v) {
+      if (v == null || v === '') return '—';
+      switch (key) {
+        case 'battery_pct': case 'lux_pct': return v + '%';
+        case 'battery_mv': return v + ' mV';
+        case 'temp_c': return Number(v).toFixed(1) + ' °C';
+        case 'rssi': return v + ' dBm';
+        case 'snr': return Number(v).toFixed(1) + ' dB';
+        case 'spreading_factor': return 'SF' + v;
+        case 'speed_kmh': return v + ' km/h';
+        case 'hdop': return Number(v).toFixed(2);
+        case 'fix_quality': return FIX_LABEL[v] != null ? v + ' — ' + FIX_LABEL[v] : String(v);
+        case 'motion': case 'is_own_report': return (v === true || v === 1 || v === 'true') ? 'Yes' : 'No';
+        default: return String(v);
+      }
+    }
+    function kvGrid(pairs) {
+      let h = '<dl class="kv">';
+      for (const [k, v] of pairs) h += `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`;
+      return h + '</dl>';
+    }
+    function paneSection(title, pairs) {
+      return `<section class="pane-sec"><h4>${esc(title)}</h4>${kvGrid(pairs)}</section>`;
+    }
+
+    function buildDetail(el, p) {
+      const meta = safeParse(p.meta);
+      const hasFix = p.lat != null && p.lon != null;
+      const used = new Set();
+
+      const posPairs = [
+        ['Latitude', p.lat == null ? '—' : p.lat.toFixed(6)],
+        ['Longitude', p.lon == null ? '—' : p.lon.toFixed(6)],
+        ['Altitude', p.alt == null ? '—' : p.alt + ' m'],
+        ['Accuracy', p.accuracy_m == null ? '—' : Math.round(p.accuracy_m) + ' m'],
+      ];
+      const sections = [];
+      for (const g of FIELD_GROUPS) {
+        const pairs = [];
+        for (const key of g.keys) {
+          if (key in meta && meta[key] != null) { pairs.push([FIELD_LABELS[key] || humanize(key), fmtField(key, meta[key])]); used.add(key); }
+        }
+        if (pairs.length) sections.push([g.title, pairs]);
+      }
+      const otherPairs = Object.keys(meta).filter((k) => !used.has(k)).map((k) => [humanize(k), fmtField(k, meta[k])]);
+      if (otherPairs.length) sections.push(['Other', otherPairs]);
+
+      const mapLink = hasFix
+        ? `<a class="btn" href="/map?focus=${p.ts}&device=${encodeURIComponent(p.device_id)}">Show on map ↗</a>`
+        : '';
+
+      let html = '';
+      html += `<div class="pane-head">`
+        + `<span class="src-badge" style="background:${colorFor(p.source_type)}">${esc(labelFor(p.source_type))}</span>`
+        + `<span class="pane-device">${esc(deviceNames[p.device_id] || p.device_id)}</span>`
+        + `<span class="pane-time">${esc(new Date(p.ts).toLocaleString())} &middot; ${esc(fmtAgo(p.ts))}</span>`
+        + `</div>`;
+      html += `<div class="pane-body"><div class="pane-info">`;
+      html += `<section class="pane-sec"><h4>Position</h4>${kvGrid(posPairs)}`
+        + (p.pinned ? `<p class="muted small">&#8962; No GPS fix — pinned to Home.</p>` : '')
+        + (mapLink ? `<div class="sec-actions">${mapLink}</div>` : `<p class="muted small">No position fix for this report.</p>`)
+        + `</section>`;
+      for (const [title, pairs] of sections) html += paneSection(title, pairs);
+      html += `</div>`; // .pane-info
+      if (hasFix && desktopMq.matches) html += `<div class="mini-map"></div>`;
+      html += `</div>`; // .pane-body
+
+      let extras = '';
+      if (p.raw) extras += `<details class="extra"><summary>Raw payload</summary><pre class="raw"></pre></details>`;
+      if (p.source_type === 'lora' && p.f_cnt != null) extras += `<details class="extra gw"><summary>Per-gateway radio detail</summary><div class="gw-body">&hellip;</div></details>`;
+      if (extras) html += `<div class="pane-extras">${extras}</div>`;
+      el.innerHTML = html;
+
+      if (hasFix && desktopMq.matches) {
+        const mm = el.querySelector('.mini-map');
+        setTimeout(() => initMiniMap(mm, p), 0);
+      }
+      if (p.raw) {
+        const pre = el.querySelector('pre.raw');
+        let txt = p.raw;
+        try { txt = JSON.stringify(JSON.parse(p.raw), null, 2); } catch (e) { /* leave as-is */ }
+        pre.textContent = txt;
+      }
+      const gw = el.querySelector('details.gw');
+      if (gw) gw.addEventListener('toggle', () => { if (gw.open && !gw.dataset.loaded) { gw.dataset.loaded = '1'; loadGateways(gw.querySelector('.gw-body'), p); } });
+    }
+
+    function initMiniMap(container, p) {
+      if (!container || container.dataset.init) return;
+      container.dataset.init = '1';
+      const m = L.map(container, { zoomControl: false, attributionControl: false, dragging: true }).setView([p.lat, p.lon], 16);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(m);
+      L.circleMarker([p.lat, p.lon], { radius: 6, color: '#fff', weight: 1.5, fillColor: colorFor(p.source_type), fillOpacity: 0.95 }).addTo(m);
+      if (p.accuracy_m != null) L.circle([p.lat, p.lon], { radius: p.accuracy_m, color: colorFor(p.source_type), weight: 1, opacity: 0.5, fillOpacity: 0.08 }).addTo(m);
+      setTimeout(() => m.invalidateSize(), 60);
+    }
+
+    async function loadGateways(el, p) {
+      el.textContent = 'loading…';
+      try {
+        const res = await fetch('/api/uplink-detail?device_id=' + encodeURIComponent(p.device_id) + '&f_cnt=' + encodeURIComponent(p.f_cnt), { credentials: 'same-origin' });
+        const body = await res.json();
+        const gws = (body && body.gateways) || [];
+        if (!gws.length) { el.innerHTML = '<span class="muted">no gateway detail stored</span>'; return; }
+        let html = '<table class="gw-table"><thead><tr><th>Gateway</th><th>RSSI</th><th>SNR</th></tr></thead><tbody>';
+        for (const g of gws) html += `<tr><td>${esc(g.gateway_id)}</td><td>${g.rssi == null ? '—' : g.rssi + ' dBm'}</td><td>${g.snr == null ? '—' : g.snr + ' dB'}</td></tr>`;
+        html += '</tbody></table>';
+        el.innerHTML = html;
+      } catch (e) { el.textContent = 'error: ' + e.message; }
+    }
+
+    // ── tabs + wiring ────────────────────────────────────────────────────────
+    let activeTab = 'charts';
+    const panels = { charts: document.getElementById('tab-charts'), table: document.getElementById('tab-table') };
+    const tabBtns = { charts: document.getElementById('tab-btn-charts'), table: document.getElementById('tab-btn-table') };
+    let controller = null;
+
+    function loadActive(range, deviceId) {
+      if (activeTab === 'charts') return loadCharts(range, deviceId);
+      return loadTable(range, deviceId);
+    }
+    function setTab(tab) {
+      if (tab === activeTab) return;
+      activeTab = tab;
+      for (const k of ['charts', 'table']) {
+        panels[k].hidden = k !== tab;
+        tabBtns[k].classList.toggle('active', k === tab);
+        tabBtns[k].setAttribute('aria-selected', String(k === tab));
+      }
+      if (controller) controller.refresh(); // build the now-active view
+    }
+    tabBtns.charts.addEventListener('click', () => setTab('charts'));
+    tabBtns.table.addEventListener('click', () => setTab('table'));
+    for (const el of [customStartEl, customEndEl]) el.addEventListener('change', () => controller && controller.refresh());
+    document.getElementById('custom-clear').addEventListener('click', () => {
+      customStartEl.value = ''; customEndEl.value = '';
+      if (controller) controller.refresh();
+    });
+
     const deviceSelect = document.getElementById('device-select');
     (async () => {
       const devices = await fetchDevices();
+      deviceNames = Object.fromEntries(devices.map((d) => [d.device_id, d.display_name]));
       if (deviceSelect) populateDeviceSelect(deviceSelect, devices, deviceFromQuery());
-      wireDashboard({
+      buildSourceFilter(devices);
+      controller = wireDashboard({
         selectId: 'range-select',
         checkboxId: 'auto-refresh',
         deviceSelectId: 'device-select',
-        load,
-        resize: true,  // uPlot doesn't auto-resize, so rebuild on viewport change
+        load: loadActive,
+        resize: true, // uPlot needs rebuild on resize; the table just re-renders
       });
     })();
   </script>
 </Layout>
 
 <style>
+  /* Right-aligned control cluster so the selects read as one toolbar group,
+     not a lone dropdown flung to the far edge. */
+  .page-bar .controls { margin-left: auto; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+  .page-bar .controls .ranges { margin-left: 0; }
+
+  /* Proper underline tabs on their own strip below the title bar. */
+  .tabbar {
+    display: flex; gap: 0.15rem; padding: 0 1rem;
+    border-bottom: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+    flex: 0 0 auto;
+  }
+  .tabbar .tab {
+    font: inherit; font-size: 0.9rem; cursor: pointer; color: inherit;
+    background: transparent; border: 0; padding: 0.6em 1.1em; opacity: 0.6;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tabbar .tab:hover:not(.active) { opacity: 0.85; }
+  .tabbar .tab.active { opacity: 1; font-weight: 600; color: var(--accent); border-bottom-color: var(--accent); }
+
   .charts {
     padding: 1rem; display: flex; flex-direction: column; gap: 1.25rem;
     max-width: 64rem; margin: 0 auto; width: 100%;
@@ -308,4 +592,91 @@ export const prerender = false;
   .chart-card .latest { font-variant-numeric: tabular-nums; font-weight: 600; color: inherit; }
   .chart-card .chart { height: 160px; }
   .motion-card .chart { height: 70px; }
+
+  /* ── table tab ── */
+  .table-wrap { max-width: 70rem; margin: 0 auto; padding: 1rem; width: 100%; }
+  .filters { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; }
+  .filters fieldset {
+    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+    border-radius: 0.45rem; padding: 0.5rem 0.8rem 0.7rem;
+  }
+  .filters legend { font-size: 0.72rem; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.04em; }
+  .src-checks { display: flex; flex-wrap: wrap; gap: 0.4rem 0.9rem; }
+  /* JS-injected (buildSourceFilter), so :global — scoped rules wouldn't match. */
+  :global(.src-checks .src-check) { display: inline-flex; align-items: center; gap: 0.35em; font-size: 0.85rem; }
+  :global(.src-checks .src-check .dot) { width: 0.7em; height: 0.7em; border-radius: 50%; display: inline-block; }
+  .range-filter label { font-size: 0.82rem; display: inline-flex; flex-direction: column; gap: 0.15rem; margin-right: 0.6rem; }
+  .range-filter input { font: inherit; padding: 0.25em 0.4em; border-radius: 0.3em; background: transparent; color: inherit; border: 1px solid color-mix(in srgb, currentColor 28%, transparent); }
+  button.ghost { font: inherit; font-size: 0.8rem; padding: 0.3em 0.7em; cursor: pointer; background: transparent; color: inherit; border: 1px solid color-mix(in srgb, currentColor 28%, transparent); border-radius: 0.3em; align-self: end; }
+
+  /* Static (template) bits stay scoped. */
+  .table-card {
+    border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+    border-radius: 0.55rem; overflow: hidden;
+  }
+  #data-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+  #data-table thead th {
+    background: color-mix(in srgb, currentColor 7%, transparent);
+    font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    opacity: 0.75; text-align: left; padding: 0.55em 0.8em;
+    border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  }
+  #data-table thead th.exp { width: 2rem; }
+  .empty { padding: 2rem; text-align: center; opacity: 0.55; }
+
+  /* Everything below is injected at runtime (loadTable / buildDetail builds the
+     rows + the expanded pane via innerHTML), so it never gets Astro's scoped
+     attribute — it MUST be :global or the CSS silently doesn't apply (that's
+     why the pane rendered as a raw list). Namespaced under #data-table so the
+     generic class names (.muted, dl.kv, .btn) can't leak to other pages. */
+  :global(#data-table td) { padding: 0.5em 0.8em; border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent); vertical-align: middle; }
+  :global(#data-table tbody tr:last-child td) { border-bottom: 0; }
+  :global(#data-table td.exp) { width: 2rem; text-align: center; padding-left: 0.5em; padding-right: 0.5em; }
+  :global(#data-table .data-row) { cursor: pointer; }
+  :global(#data-table .data-row:hover) { background: color-mix(in srgb, currentColor 6%, transparent); }
+  :global(#data-table .data-row.open) { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  :global(#data-table .data-row.open td) { border-bottom-color: transparent; }
+  :global(#data-table .data-row .chev) { display: inline-block; opacity: 0.55; }
+  :global(#data-table .data-row.open .chev) { opacity: 0.9; }
+  :global(#data-table .data-row .ago) { font-size: 0.72rem; opacity: 0.55; }
+  :global(#data-table .data-row .pos) { font-variant-numeric: tabular-nums; }
+  :global(#data-table .src-badge) { display: inline-block; padding: 0.1em 0.55em; border-radius: 0.3em; font-size: 0.76em; font-weight: 600; color: #fff; }
+  :global(#data-table .muted) { opacity: 0.5; }
+  :global(#data-table .muted.small) { font-size: 0.8rem; opacity: 0.6; }
+  :global(#data-table .home-tag) { font-size: 0.78em; opacity: 0.7; white-space: nowrap; }
+
+  /* Expanded "informative pane" — grouped, formatted sections + a mini-map. */
+  :global(#data-table .detail-row > td) { background: color-mix(in srgb, var(--accent) 5%, transparent); padding: 0; }
+  :global(#data-table .detail) { padding: 0.85rem 1rem 1.05rem; }
+  :global(#data-table .pane-head) { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.85rem; }
+  :global(#data-table .pane-head .pane-device) { font-weight: 600; }
+  :global(#data-table .pane-head .pane-time) { font-size: 0.8rem; opacity: 0.6; margin-left: auto; }
+  :global(#data-table .pane-body) { display: flex; gap: 1.1rem; align-items: flex-start; }
+  :global(#data-table .pane-info) { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0.7rem; align-content: start; }
+  :global(#data-table .pane-sec) {
+    border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+    border-radius: 0.45rem; padding: 0.55rem 0.75rem 0.65rem;
+    background: color-mix(in srgb, Canvas 55%, transparent);
+  }
+  :global(#data-table .pane-sec h4) { margin: 0 0 0.45rem; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.55; }
+  :global(#data-table dl.kv) { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.9rem; font-size: 0.84rem; }
+  :global(#data-table dl.kv dt) { opacity: 0.6; white-space: nowrap; }
+  :global(#data-table dl.kv dd) { margin: 0; text-align: right; font-variant-numeric: tabular-nums; word-break: break-word; }
+  :global(#data-table .sec-actions) { margin-top: 0.6rem; }
+  :global(#data-table .detail .btn) {
+    display: inline-block; font-size: 0.8rem; text-decoration: none; color: inherit;
+    padding: 0.32em 0.75em; border-radius: 0.3em; border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  }
+  :global(#data-table .detail .btn:hover) { background: color-mix(in srgb, currentColor 10%, transparent); }
+  :global(#data-table .mini-map) { flex: 0 0 320px; height: 250px; border-radius: 0.45rem; overflow: hidden; border: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
+  @media (max-width: 819px) {
+    :global(#data-table .pane-body) { flex-direction: column; }
+    :global(#data-table .mini-map) { flex-basis: auto; width: 100%; }
+  }
+  :global(#data-table .pane-extras) { margin-top: 0.85rem; display: flex; flex-direction: column; gap: 0.45rem; }
+  :global(#data-table .extra) { font-size: 0.82rem; }
+  :global(#data-table .extra summary) { cursor: pointer; opacity: 0.75; padding: 0.2em 0; }
+  :global(#data-table pre.raw) { background: color-mix(in srgb, currentColor 8%, transparent); padding: 0.6rem; border-radius: 0.35rem; overflow: auto; max-height: 22rem; font-size: 0.78rem; margin: 0.3rem 0 0; }
+  :global(#data-table .gw-table) { border-collapse: collapse; font-size: 0.8rem; margin-top: 0.4rem; }
+  :global(#data-table .gw-table th), :global(#data-table .gw-table td) { text-align: left; padding: 0.2em 0.9em 0.2em 0; border-bottom: 0; }
 </style>

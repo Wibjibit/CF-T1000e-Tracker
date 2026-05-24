@@ -13,6 +13,18 @@ export const TTN_API_KEY_KEY = 'ttn_api_key';
 export const TTN_NS_HOST_KEY = 'ttn_ns_host';
 export const TTN_NS_HOST_DEFAULT = 'eu1.cloud.thethings.network';
 
+export const MAP_APPEARANCE_KEY = 'map_appearance';
+
+export const HOME_LAT_KEY = 'home_lat';
+export const HOME_LON_KEY = 'home_lon';
+
+/** The single Home coordinate no-fix Find Hub reports can be pinned to. Both
+ *  null when unset (the pinning feature stays dormant). */
+export interface HomeLocation {
+  lat: number | null;
+  lon: number | null;
+}
+
 export interface ForwarderConfig {
   enabled: boolean;
   url: string;
@@ -28,6 +40,8 @@ export interface TtnApiConfig {
   /** Network server host, e.g. eu1.cloud.thethings.network. */
   host: string;
 }
+
+import { resolveAppearance, type Appearance } from './sources-display';
 
 interface SettingRow { value: string; }
 
@@ -92,6 +106,31 @@ export async function writeTtnApiConfig(
 ): Promise<void> {
   await writeSetting(db, TTN_API_KEY_KEY, config.apiKey);
   await writeSetting(db, TTN_NS_HOST_KEY, config.host || TTN_NS_HOST_DEFAULT);
+}
+
+/** Read the map colour overrides, resolved against the built-in defaults. */
+export async function readMapAppearance(db: D1Database): Promise<Appearance> {
+  return resolveAppearance(await readSetting(db, MAP_APPEARANCE_KEY));
+}
+
+/** Persist the map colour overrides as a JSON blob. */
+export async function writeMapAppearance(db: D1Database, appearance: Appearance): Promise<void> {
+  await writeSetting(db, MAP_APPEARANCE_KEY, JSON.stringify(appearance));
+}
+
+/** Read the Home coordinate (both null when unset / malformed). */
+export async function readHomeLocation(db: D1Database): Promise<HomeLocation> {
+  const [latStr, lonStr] = await Promise.all([readSetting(db, HOME_LAT_KEY), readSetting(db, HOME_LON_KEY)]);
+  const lat = latStr == null ? NaN : Number(latStr);
+  const lon = lonStr == null ? NaN : Number(lonStr);
+  const ok = Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
+  return ok ? { lat, lon } : { lat: null, lon: null };
+}
+
+/** Persist (or clear, when null) the Home coordinate. */
+export async function writeHomeLocation(db: D1Database, lat: number | null, lon: number | null): Promise<void> {
+  await writeSetting(db, HOME_LAT_KEY, lat == null ? '' : String(lat));
+  await writeSetting(db, HOME_LON_KEY, lon == null ? '' : String(lon));
 }
 
 export interface ForwardLogRow {

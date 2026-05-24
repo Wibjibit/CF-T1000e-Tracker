@@ -81,6 +81,10 @@ export interface DeviceSourceRow {
   enabled: number;
   added_at: number;
   last_report_at: number | null;
+  /** Last successful EID-window refresh (findhub liveness, Phase 4). NULL = never. */
+  last_refreshed_at: number | null;
+  /** 1 = pin this source's no-fix reports to the Home location (migration 0015). */
+  pin_no_fix: number;
 }
 
 export interface DeviceWithSources {
@@ -113,11 +117,13 @@ export async function listDevicesWithSources(db: D1Database): Promise<DeviceWith
                 ds.device_id      AS device_id,
                 ds.source_type    AS source_type,
                 ds.source_ref     AS source_ref,
-                ds.account_id     AS account_id,
-                a.account_label   AS account_label,
-                ds.enabled        AS enabled,
-                ds.added_at       AS added_at,
-                ds.last_report_at AS last_report_at
+                ds.account_id        AS account_id,
+                a.account_label      AS account_label,
+                ds.enabled           AS enabled,
+                ds.added_at          AS added_at,
+                ds.last_report_at    AS last_report_at,
+                ds.last_refreshed_at AS last_refreshed_at,
+                ds.pin_no_fix        AS pin_no_fix
            FROM device_sources ds
            LEFT JOIN accounts a ON a.account_id = ds.account_id
           ORDER BY ds.source_type, ds.source_ref`,
@@ -137,6 +143,8 @@ export async function listDevicesWithSources(db: D1Database): Promise<DeviceWith
       enabled: s.enabled,
       added_at: s.added_at,
       last_report_at: s.last_report_at,
+      last_refreshed_at: s.last_refreshed_at,
+      pin_no_fix: s.pin_no_fix,
     });
     byDevice.set(s.device_id, list);
   }
@@ -164,6 +172,12 @@ export async function setSourceEnabled(
 
 export async function deleteSource(db: D1Database, sourceId: number): Promise<void> {
   await db.prepare(`DELETE FROM device_sources WHERE source_id = ?`).bind(sourceId).run();
+}
+
+/** Toggle whether this source's no-fix reports are pinned to the Home location
+ *  (migration 0015). Only meaningful for findhub sources. */
+export async function setSourcePinNoFix(db: D1Database, sourceId: number, pin: boolean): Promise<void> {
+  await db.prepare(`UPDATE device_sources SET pin_no_fix = ? WHERE source_id = ?`).bind(pin ? 1 : 0, sourceId).run();
 }
 
 export async function renameDevice(

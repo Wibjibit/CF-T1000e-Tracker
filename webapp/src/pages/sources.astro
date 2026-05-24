@@ -4,6 +4,7 @@ import {
   listAccounts,
   listDevicesWithSources,
   setSourceEnabled,
+  setSourcePinNoFix,
   deleteSource,
   renameDevice,
   addDevice,
@@ -12,6 +13,8 @@ import {
   SOURCE_TYPES,
 } from '../lib/sources';
 import { SOURCE_LABELS, colorFor } from '../lib/sources-display';
+import { readMapAppearance } from '../lib/settings';
+import { eidWindowValidUntilMs, isEidWindowStale } from '../lib/fmdn/eid-window';
 import { formatAgo } from '../lib/format';
 import Layout from '../layouts/Layout.astro';
 
@@ -37,6 +40,13 @@ if (Astro.request.method === 'POST') {
       case 'delete_source': {
         const sourceId = Number(form.get('source_id'));
         await deleteSource(env.DB, sourceId);
+        saved = true;
+        break;
+      }
+      case 'toggle_pin': {
+        const sourceId = Number(form.get('source_id'));
+        const pin = (form.get('pin') ?? '').toString() === '1';
+        await setSourcePinNoFix(env.DB, sourceId, pin);
         saved = true;
         break;
       }
@@ -88,6 +98,36 @@ function accountHealth(row: {
   if (row.last_error) return { text: 'auth error', cls: 'bad' };
   if (row.last_refreshed_at) return { text: 'ok', cls: 'ok' };
   return { text: 'never used', cls: 'neutral' };
+}
+
+const nowMs = Date.now();
+
+// Source badge colours follow the same /settings → Map appearance overrides the
+// map uses, so a recoloured source looks consistent here too.
+const appearance = await readMapAppearance(env.DB);
+const srcColor = (t: string) => appearance.sources[t as keyof typeof appearance.sources] ?? colorFor(t);
+
+/**
+ * Find Hub static-EID liveness (Phase 4). The daily refresh slides the
+ * precomputed-EID window to [now, now+4d]; if it stops, the tag drops off Find
+ * Hub once the window lapses. Surface valid/stale + when the window expires.
+ * Non-findhub sources have no EID window.
+ */
+function eidLiveness(s: {
+  source_type: string;
+  last_refreshed_at: number | null;
+}): { text: string; cls: string; title: string } | null {
+  if (s.source_type !== 'findhub') return null;
+  if (s.last_refreshed_at == null) {
+    return { text: 'never refreshed', cls: 'warn', title: 'EID window has never been refreshed' };
+  }
+  const stale = isEidWindowStale(s.last_refreshed_at, nowMs);
+  const until = eidWindowValidUntilMs(s.last_refreshed_at);
+  return {
+    text: stale ? 'stale' : 'valid',
+    cls: stale ? 'warn' : 'ok',
+    title: `last refreshed ${formatAgo(s.last_refreshed_at)} · EID valid until ${new Date(until).toISOString()}`,
+  };
 }
 ---
 <Layout title="Devices & Sources">
@@ -242,13 +282,15 @@ function accountHealth(row: {
                     <th>Account</th>
                     <th>Enabled</th>
                     <th>Last report</th>
+                    <th>EID liveness</th>
+                    <th>No-fix → Home</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {d.sources.map((s) => (
                     <tr>
-                      <td><span class="src-badge" style={`background:${colorFor(s.source_type)}`}>{SOURCE_LABELS[s.source_type]}</span></td>
+                      <td><span class="src-badge" style={`background:${srcColor(s.source_type)}`}>{SOURCE_LABELS[s.source_type]}</span></td>
                       <td><span class="ref mono">{s.source_ref}</span></td>
                       <td>{s.account_label ?? '—'}</td>
                       <td>
@@ -262,6 +304,28 @@ function accountHealth(row: {
                         </form>
                       </td>
                       <td>{s.last_report_at ? formatAgo(s.last_report_at) : 'never'}</td>
+                      <td>
+                        {(() => {
+                          const live = eidLiveness(s);
+                          return live ? (
+                            <span class={`badge ${live.cls}`} title={live.title}>{live.text}</span>
+                          ) : (
+                            <span>—</span>
+                          );
+                        })()}
+                      </td>
+                      <td>
+                        {s.source_type === 'findhub' ? (
+                          <form method="POST" class="inline-form">
+                            <input type="hidden" name="action" value="toggle_pin" />
+                            <input type="hidden" name="source_id" value={s.source_id} />
+                            <input type="hidden" name="pin" value={s.pin_no_fix ? '0' : '1'} />
+                            <button type="submit" title="Pin this source's no-fix reports to the Home location (set Home in Settings)">
+                              {s.pin_no_fix ? 'On → Home' : 'Off'}
+                            </button>
+                          </form>
+                        ) : <span>—</span>}
+                      </td>
                       <td>
                         <form method="POST" class="inline-form">
                           <input type="hidden" name="action" value="delete_source" />

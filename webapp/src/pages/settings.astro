@@ -6,8 +6,18 @@ import {
   recentForwardLog,
   readTtnApiConfig,
   writeTtnApiConfig,
+  readMapAppearance,
+  writeMapAppearance,
+  readHomeLocation,
+  writeHomeLocation,
   TTN_NS_HOST_DEFAULT,
 } from '../lib/settings';
+import {
+  DEFAULT_APPEARANCE,
+  resolveAppearance,
+  SOURCE_TYPES,
+  SOURCE_LABELS,
+} from '../lib/sources-display';
 import { formatAgo } from '../lib/format';
 import Layout from '../layouts/Layout.astro';
 
@@ -15,13 +25,53 @@ export const prerender = false;
 
 let saved = false;
 let saveError: string | null = null;
-let savedSection: 'forwarder' | 'ttn_api' | null = null;
+let savedSection: 'forwarder' | 'ttn_api' | 'appearance' | 'home' | null = null;
 
 if (Astro.request.method === 'POST') {
   try {
     const form = await Astro.request.formData();
     const section = (form.get('section') ?? '').toString();
-    if (section === 'ttn_api') {
+    if (section === 'appearance') {
+      if (form.get('reset')) {
+        await writeMapAppearance(env.DB, DEFAULT_APPEARANCE);
+      } else {
+        const get = (n: string) => (form.get(n) ?? '').toString();
+        // resolveAppearance sanitises every field (non-#hex → default), so a
+        // tampered POST can't inject anything but a colour.
+        const appearance = resolveAppearance(
+          JSON.stringify({
+            sources: {
+              lora: get('c_lora'),
+              findhub: get('c_findhub'),
+              findmy: get('c_findmy'),
+              google_maps_sharing: get('c_google_maps_sharing'),
+            },
+            track: get('c_track'),
+            trackCasing: get('c_trackCasing'),
+            cluster: get('c_cluster'),
+          }),
+        );
+        await writeMapAppearance(env.DB, appearance);
+      }
+      saved = true;
+      savedSection = 'appearance';
+    } else if (section === 'home') {
+      if (form.get('clear')) {
+        await writeHomeLocation(env.DB, null, null);
+        saved = true;
+        savedSection = 'home';
+      } else {
+        const lat = Number(form.get('home_lat'));
+        const lon = Number(form.get('home_lon'));
+        if (Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+          await writeHomeLocation(env.DB, lat, lon);
+          saved = true;
+          savedSection = 'home';
+        } else {
+          saveError = 'Pick a point on the map first (no coordinate set).';
+        }
+      }
+    } else if (section === 'ttn_api') {
       const apiKey = (form.get('ttn_api_key') ?? '').toString().trim();
       const host = (form.get('ttn_ns_host') ?? '').toString().trim() || TTN_NS_HOST_DEFAULT;
       await writeTtnApiConfig(env.DB, { apiKey, host });
@@ -51,7 +101,17 @@ if (Astro.request.method === 'POST') {
 
 const config = await readForwarderConfig(env.DB);
 const ttnApi = await readTtnApiConfig(env.DB);
+const appearance = await readMapAppearance(env.DB);
+const home = await readHomeLocation(env.DB);
 const logs = await recentForwardLog(env.DB, 50);
+
+// Color swatches for the appearance card (source palette + track + cluster).
+const colorFields: { name: string; label: string; value: string }[] = [
+  ...SOURCE_TYPES.map((t) => ({ name: `c_${t}`, label: `${SOURCE_LABELS[t]} pins`, value: appearance.sources[t] })),
+  { name: 'c_track', label: 'Track line', value: appearance.track },
+  { name: 'c_trackCasing', label: 'Track casing (halo)', value: appearance.trackCasing },
+  { name: 'c_cluster', label: 'Cluster bubbles', value: appearance.cluster },
+];
 
 function statusBadge(status: number): { text: string; cls: string } {
   if (status === 0) return { text: 'err', cls: 'bad' };
@@ -61,6 +121,13 @@ function statusBadge(status: number): { text: string; cls: string } {
 }
 ---
 <Layout title="Settings">
+  <link
+    slot="head"
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin="anonymous"
+  />
   <section class="page">
     <h1 class="page-title">Settings</h1>
 
@@ -103,10 +170,78 @@ function statusBadge(status: number): { text: string; cls: string } {
       .badge.bad  { background: color-mix(in srgb, #c33   35%, transparent); color: #fff; }
 
       .empty { padding: 1.5rem; text-align: center; opacity: 0.55; font-size: 0.95rem; }
+
+      .swatches {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+        gap: 0.55rem 1rem; margin-bottom: 0.7rem;
+      }
+      .swatch { display: flex; align-items: center; gap: 0.5em; font-size: 0.85rem; }
+      .swatch input[type="color"] {
+        width: 2.2rem; height: 1.6rem; padding: 0; flex: none; cursor: pointer;
+        border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+        border-radius: 0.3em; background: transparent;
+      }
+      .swatch code { opacity: 0.55; font-size: 0.78em; margin-left: auto; }
+      .btn-row { display: flex; gap: 0.6rem; }
+      button.secondary { background: transparent; border: 1px solid color-mix(in srgb, currentColor 28%, transparent); }
+
+      .home-map { height: 320px; border-radius: 0.45rem; overflow: hidden; margin-bottom: 0.7rem; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
+      .home-row { display: flex; align-items: center; gap: 0.6rem; }
+      .home-readout { font-variant-numeric: tabular-nums; font-size: 0.88rem; opacity: 0.8; margin-right: auto; }
     </style>
 
-    {saved && <div class="toast ok">Saved{savedSection === 'ttn_api' ? ' TTN API config' : savedSection === 'forwarder' ? ' forwarder config' : ''}.</div>}
+    {saved && <div class="toast ok">Saved{savedSection === 'ttn_api' ? ' TTN API config' : savedSection === 'forwarder' ? ' forwarder config' : savedSection === 'appearance' ? ' map appearance' : savedSection === 'home' ? ' Home location' : ''}.</div>}
     {saveError && <div class="toast bad">Could not save: {saveError}</div>}
+
+    <section class="card">
+      <h2>Map appearance</h2>
+      <p style="margin-top: 0; opacity: 0.7; font-size: 0.92rem;">
+        Colours used on the <a href="/map">map</a>. Source colours drive pins,
+        popups, the layer-panel dots, accuracy rings and the position marker; the
+        track colours are the route line and its contrast halo; cluster is the
+        aggregation bubble.
+      </p>
+      <form method="POST">
+        <input type="hidden" name="section" value="appearance" />
+        <div class="swatches">
+          {colorFields.map((f) => (
+            <label class="swatch">
+              <input type="color" name={f.name} value={f.value} />
+              <span>{f.label}</span>
+              <code>{f.value}</code>
+            </label>
+          ))}
+        </div>
+        <div class="btn-row">
+          <button type="submit">Save</button>
+          <button type="submit" name="reset" value="1" class="secondary">Reset to defaults</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Home location</h2>
+      <p style="margin-top: 0; opacity: 0.7; font-size: 0.92rem;">
+        A single &ldquo;home&rdquo; point. Find Hub devices that report with no GPS
+        fix (e.g. a stationary lounge/bedroom display) can be pinned here so they
+        still appear on the map &mdash; turn on <strong>No-fix &rarr; Home</strong>
+        for the source in <a href="/sources">Devices &amp; Sources</a>. The true
+        (location-less) report is kept; Home is snapshotted onto each no-fix
+        report the first time it&rsquo;s shown, so moving Home later never moves
+        markers already pinned. Click or drag on the map to set it.
+      </p>
+      <form method="POST" id="home-form">
+        <input type="hidden" name="section" value="home" />
+        <input type="hidden" name="home_lat" id="home-lat" value={home.lat ?? ''} />
+        <input type="hidden" name="home_lon" id="home-lon" value={home.lon ?? ''} />
+        <div id="home-map" class="home-map"></div>
+        <div class="home-row">
+          <span class="home-readout" id="home-readout">{home.lat != null ? `${home.lat.toFixed(6)}, ${home.lon!.toFixed(6)}` : 'not set'}</span>
+          <button type="submit">Save</button>
+          <button type="submit" name="clear" value="1" class="secondary">Clear</button>
+        </div>
+      </form>
+    </section>
 
     <section class="card">
       <h2>TTN gateway API</h2>
@@ -231,4 +366,46 @@ function statusBadge(status: number): { text: string; cls: string } {
       )}
     </section>
   </section>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin="anonymous"
+    is:inline
+  ></script>
+  <script is:inline define:vars={{ home }}>
+    (function () {
+      function init() {
+        var L = window.L;
+        var el = document.getElementById('home-map');
+        if (!L || !el) return;
+        var hasHome = home.lat != null && home.lon != null;
+        var map = L.map(el).setView([hasHome ? home.lat : 52.5, hasHome ? home.lon : -1.5], hasHome ? 15 : 6);
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        }).addTo(map);
+
+        var latI = document.getElementById('home-lat');
+        var lonI = document.getElementById('home-lon');
+        var out = document.getElementById('home-readout');
+        var marker = null;
+        function place(ll) {
+          if (!marker) {
+            marker = L.marker(ll, { draggable: true }).addTo(map);
+            marker.on('dragend', function () { place(marker.getLatLng()); });
+          } else {
+            marker.setLatLng(ll);
+          }
+          latI.value = ll.lat.toFixed(6);
+          lonI.value = ll.lng.toFixed(6);
+          out.textContent = ll.lat.toFixed(6) + ', ' + ll.lng.toFixed(6);
+        }
+        if (hasHome) place({ lat: home.lat, lng: home.lon });
+        map.on('click', function (e) { place(e.latlng); });
+        setTimeout(function () { map.invalidateSize(); }, 60);
+      }
+      if (window.L) init(); else window.addEventListener('load', init);
+    })();
+  </script>
 </Layout>

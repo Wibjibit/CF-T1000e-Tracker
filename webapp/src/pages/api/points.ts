@@ -1,6 +1,8 @@
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { isRange, rangeToSinceMs, type Range } from '../../lib/timeRange';
+import { buildPointsQuery, resolveEffectivePosition } from '../../lib/points-query';
+import { readHomeLocation } from '../../lib/settings';
 
 export const prerender = false;
 
@@ -36,6 +38,19 @@ interface PointRow {
   // columns above stay for the timeline charts (which read LoRa telemetry).
   accuracy_m: number | null;
   meta: string | null;
+  // The verbatim raw_payload (decoded frame / report blob) + LoRa frame counter,
+  // for the timeline table's expandable detail. f_cnt keys the lazy per-gateway
+  // lookup (/api/uplink-detail).
+  raw: string | null;
+  f_cnt: number | null;
+  // Home-pinning internals (migration 0015). report_id keys the one-time stamp;
+  // pinned_lat/lon are the per-report Home snapshot; pin_no_fix is the source's
+  // opt-in. `pinned` is the resolved output flag (position came from Home).
+  report_id: number;
+  pinned_lat: number | null;
+  pinned_lon: number | null;
+  pin_no_fix: number | null;
+  pinned?: boolean;
 }
 
 export const GET: APIRoute = async ({ url }) => {
@@ -57,63 +72,72 @@ export const GET: APIRoute = async ({ url }) => {
     sinceMs = rangeToSinceMs(range);
   }
 
+  // Optional upper bound (the timeline table's custom end date/time).
+  let untilMs: number | null = null;
+  const untilParam = params.get('until');
+  if (untilParam !== null) {
+    const parsed = Number(untilParam);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return new Response(JSON.stringify({ ok: false, error: 'Bad "until" param' }), {
+        status: 400, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    untilMs = parsed;
+  }
+
   const onlyWithFix = params.get('with_fix') === '1';
-  // Optional device filter. Empty / absent = all devices (one device today,
-  // but the map's device selector passes this through for the multi-device
-  // future — docs/architecture.md "UI").
+  // Optional device filter. Empty / absent = all devices.
   const deviceId = params.get('device_id')?.trim() || null;
+  // Optional source-type (network) filter: comma-separated, e.g. "lora,findhub".
+  // Invalid types are dropped by the builder; empty = all sources.
+  const sourceTypes = (params.get('source_type') ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 
-  // Read from the unified `reports` timeline, NOT `uplinks` — every mechanism's
-  // decoded output lands there. The LoRa telemetry that used to be flat columns
-  // now lives in source_metadata_json (the key set is owned by lib/reports.ts /
-  // migration 0011); json_extract pulls it back into the flat shape the map and
-  // timeline already consume. A JSON boolean `motion` extracts as 1/0, matching
-  // the old column. Non-LoRa rows simply yield null telemetry — the position
-  // columns (lat/lon/alt/source_type) are source-agnostic.
-  //
-  // `with_fix` filters on `latitude IS NOT NULL`: decoder.ts nulls latitude
-  // exactly when there's no usable fix, so this reproduces the old
-  // `fix_quality > 0 AND latitude IS NOT NULL` filter row-for-row for LoRa,
-  // while staying correct for sources that have no fix_quality concept.
-  const binds: (string | number)[] = [sinceMs];
-  let where = 'received_at >= ?';
-  if (deviceId) {
-    where += ' AND device_id = ?';
-    binds.push(deviceId);
-  }
-  if (onlyWithFix) {
-    where += ' AND latitude IS NOT NULL';
-  }
-
-  const sql = `
-    SELECT received_at AS ts,
-           device_id, source_type,
-           latitude AS lat, longitude AS lon, altitude_m AS alt,
-           accuracy_m,
-           source_metadata_json AS meta,
-           json_extract(source_metadata_json, '$.fix_quality')       AS fix,
-           json_extract(source_metadata_json, '$.sats_tracked')      AS sats_tracked,
-           json_extract(source_metadata_json, '$.sats_in_view')      AS sats_in_view,
-           json_extract(source_metadata_json, '$.hdop')              AS hdop,
-           json_extract(source_metadata_json, '$.speed_kmh')         AS speed,
-           json_extract(source_metadata_json, '$.battery_pct')       AS battery_pct,
-           json_extract(source_metadata_json, '$.battery_mv')        AS battery_mv,
-           json_extract(source_metadata_json, '$.temp_c')            AS temp_c,
-           json_extract(source_metadata_json, '$.lux_pct')           AS lux_pct,
-           json_extract(source_metadata_json, '$.motion')            AS motion,
-           json_extract(source_metadata_json, '$.rssi')              AS rssi,
-           json_extract(source_metadata_json, '$.snr')               AS snr,
-           json_extract(source_metadata_json, '$.spreading_factor')  AS sf
-      FROM reports
-     WHERE ${where}
-     ORDER BY received_at DESC
-     LIMIT ?
-  `;
-  binds.push(MAX_POINTS);
+  // The query reads the unified `reports` table; see lib/points-query.ts for the
+  // column set + the json_extract of the LoRa telemetry. `with_fix` →
+  // `latitude IS NOT NULL` (decoder.ts nulls latitude exactly when there's no
+  // usable fix, so this is the old fix_quality filter row-for-row for LoRa, and
+  // correct for sources with no fix_quality concept).
+  const { sql, binds } = buildPointsQuery({
+    sinceMs,
+    untilMs,
+    deviceId,
+    sourceTypes,
+    onlyWithFix,
+    limit: MAX_POINTS,
+  });
 
   const result = await env.DB.prepare(sql).bind(...binds).all<PointRow>();
+
+  // Home-pinning: resolve each row's effective position (true ?? snapshot ??
+  // Home for opted-in no-fix findhub), stamping the snapshot once so moving Home
+  // later never moves already-pinned markers (migration 0015 / settings Home).
+  const home = await readHomeLocation(env.DB);
+  const stamps: D1PreparedStatement[] = [];
+  const kept: PointRow[] = [];
+  for (const row of result.results ?? []) {
+    const eff = resolveEffectivePosition(row, home);
+    if (eff.needsStamp && eff.lat != null && eff.lon != null) {
+      stamps.push(
+        env.DB
+          .prepare(`UPDATE reports SET pinned_latitude = ?, pinned_longitude = ? WHERE report_id = ?`)
+          .bind(eff.lat, eff.lon, row.report_id),
+      );
+    }
+    // with_fix means "has an effective position" — drop the still-locationless.
+    if (onlyWithFix && eff.lat == null) continue;
+    row.lat = eff.lat;
+    row.lon = eff.lon;
+    row.pinned = eff.pinned;
+    kept.push(row);
+  }
+  // Persist the one-time snapshots (idempotent — only un-stamped rows reach here).
+  if (stamps.length) await env.DB.batch(stamps);
+
   // The query is DESC for index efficiency; flip to ASC for the timeline / polyline.
-  const points = (result.results ?? []).slice().reverse();
+  const points = kept.slice().reverse();
 
   return new Response(
     JSON.stringify({

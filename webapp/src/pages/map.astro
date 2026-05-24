@@ -5,7 +5,13 @@
 // drawn as its own clustered, clickable pin; a layer panel toggles each device
 // and source on/off; popups surface ALL metadata for the report behind the pin.
 import Layout from '../layouts/Layout.astro';
+import { env } from 'cloudflare:workers';
+import { readMapAppearance } from '../lib/settings';
 export const prerender = false;
+
+// User-customisable colours (/settings → Map appearance). Injected into the
+// client bundle below; the script falls back to DEFAULT_APPEARANCE if absent.
+const appearance = await readMapAppearance(env.DB);
 ---
 <Layout title="T1000-E Tracker — map">
   <link
@@ -63,6 +69,10 @@ export const prerender = false;
     crossorigin="anonymous"
     is:inline
   ></script>
+  <script is:inline define:vars={{ appearance }}>
+    // SSR-resolved map colours (from /settings). Read by the module below.
+    window.__APPEARANCE__ = appearance;
+  </script>
   <script>
     // @ts-nocheck
     // Bundled by Astro. window.L (Leaflet) + L.markerClusterGroup come from the
@@ -70,7 +80,13 @@ export const prerender = false;
     // they're there by the time we execute. @ts-nocheck because Leaflet's
     // runtime globals aren't typed in this project.
     import { wireDashboard, fetchDevices } from '../scripts/dashboard';
-    import { SOURCE_COLORS, SOURCE_LABELS, colorFor, labelFor } from '../lib/sources-display';
+    import { SOURCE_LABELS, labelFor, colorFor as defaultColorFor, DEFAULT_APPEARANCE } from '../lib/sources-display';
+
+    // User colours injected by SSR (above); fall back to the built-in defaults.
+    const APPEARANCE = window.__APPEARANCE__ && window.__APPEARANCE__.sources
+      ? window.__APPEARANCE__
+      : DEFAULT_APPEARANCE;
+    const colorFor = (s) => APPEARANCE.sources[s] || defaultColorFor(s);
 
     const L = window.L;
     const map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([52.5, -1.5], 6);
@@ -85,6 +101,17 @@ export const prerender = false;
       maxClusterRadius: 50,
       spiderfyOnMaxZoom: true,
       showCoverageOnHover: false,
+      // Recolour the cluster bubble to the configured colour while keeping the
+      // count + a size-by-density cue (the default CSS tiers are green/amber/red).
+      iconCreateFunction: (c) => {
+        const n = c.getChildCount();
+        const size = n < 10 ? 34 : n < 100 ? 40 : n < 1000 ? 46 : 52;
+        return L.divIcon({
+          html: `<div class="mc-bubble" style="background:${APPEARANCE.cluster};width:${size}px;height:${size}px;line-height:${size}px;">${n}</div>`,
+          className: 'mc-cluster',
+          iconSize: [size, size],
+        });
+      },
     }).addTo(map);
     const trackLayer = L.layerGroup().addTo(map);
 
@@ -97,6 +124,15 @@ export const prerender = false;
     let showTrack = true;
     let fitted = false; // only auto-fit the view once
     let accuracyCircle = null; // transient ring shown while a popup is open
+
+    // Deep-link from the timeline table: /map?focus=<received_at ms> reveals +
+    // opens that report's popup (combine with ?device= to disambiguate).
+    const focusTs = (() => {
+      const f = new URLSearchParams(location.search).get('focus');
+      const n = Number(f);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    })();
+    let focusDone = false;
 
     const statusEl = document.getElementById('status');
     const setStatus = (m) => { if (statusEl) statusEl.innerHTML = m; };
@@ -124,7 +160,7 @@ export const prerender = false;
     }
 
     function visiblePoints() {
-      return allPoints.filter((p) => !hiddenDevices.has(p.device_id) && !hiddenSources.has(p.source_type));
+      return allPoints.filter((p) => p.lat != null && !hiddenDevices.has(p.device_id) && !hiddenSources.has(p.source_type));
     }
 
     // Flatten a point to a single property bag (core + every metadata key) for
@@ -155,6 +191,7 @@ export const prerender = false;
       const coords = `${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}`;
       let core =
         `<div class="rp-core">` +
+        (p.pinned ? `<div class="rp-pinned">&#8962; At Home (no GPS fix)</div>` : '') +
         `<div>${coords}${accuracy}</div>` +
         (p.alt != null ? `<div>Altitude ${Math.round(p.alt)} m</div>` : '') +
         `</div>`;
@@ -183,14 +220,25 @@ export const prerender = false;
       // the tag). Foreign fixes are less certain → render them lighter + dashed.
       const meta = safeParse(p.meta);
       const foreign = p.source_type === 'findhub' && meta.is_own_report === false;
-      const m = L.circleMarker([p.lat, p.lon], {
-        radius: 5,
-        color: '#fff',
-        weight: 1.5,
-        fillColor: color,
-        fillOpacity: foreign ? 0.4 : 0.95,
-        dashArray: foreign ? '2,3' : null,
-      });
+      // Home-pinned (no real fix): a distinct house marker so it's never mistaken
+      // for a GPS position.
+      const m = p.pinned
+        ? L.marker([p.lat, p.lon], {
+            icon: L.divIcon({
+              className: 'home-pin-wrap',
+              html: `<div class="home-pin" style="background:${color}">&#8962;</div>`,
+              iconSize: [22, 22],
+              iconAnchor: [11, 11],
+            }),
+          })
+        : L.circleMarker([p.lat, p.lon], {
+            radius: 5,
+            color: '#fff',
+            weight: 1.5,
+            fillColor: color,
+            fillOpacity: foreign ? 0.4 : 0.95,
+            dashArray: foreign ? '2,3' : null,
+          });
       m.bindPopup(() => popupHtml(p), { maxWidth: 340 });
       m.on('popupopen', () => {
         if (p.accuracy_m != null) {
@@ -208,15 +256,44 @@ export const prerender = false;
     function render() {
       const pts = visiblePoints();
       cluster.clearLayers();
-      cluster.addLayers(pts.map(makeMarker));
+      const markers = pts.map(makeMarker);
+      cluster.addLayers(markers);
+
+      // Deep-link focus: reveal (un-cluster) + open the requested report once.
+      if (focusTs && !focusDone) {
+        const i = pts.findIndex((p) => p.ts === focusTs);
+        if (i >= 0) {
+          focusDone = true;
+          fitted = true; // suppress the initial auto-fit so it can't override us
+          const mk = markers[i];
+          try {
+            cluster.zoomToShowLayer(mk, () => mk.openPopup());
+          } catch (e) {
+            map.setView([pts[i].lat, pts[i].lon], 17);
+            mk.openPopup();
+          }
+        }
+      }
 
       trackLayer.clearLayers();
       if (showTrack) {
         const byDev = {};
         for (const p of pts) (byDev[p.device_id] ||= []).push([p.lat, p.lon]);
         for (const dev in byDev) {
-          if (byDev[dev].length > 1)
-            L.polyline(byDev[dev], { color: '#777', weight: 2, opacity: 0.55, dashArray: '4,5' }).addTo(trackLayer);
+          const latlngs = byDev[dev];
+          if (latlngs.length < 2) continue;
+          // White casing under a bold solid line so the track stays legible on
+          // the light basemap AND reads distinctly from its grey dashed parcel
+          // lines (a thin grey dash blended into both). interactive:false so the
+          // line never swallows a marker/popup click.
+          L.polyline(latlngs, {
+            color: APPEARANCE.trackCasing, weight: 6, opacity: 0.8,
+            lineCap: 'round', lineJoin: 'round', interactive: false,
+          }).addTo(trackLayer);
+          L.polyline(latlngs, {
+            color: APPEARANCE.track, weight: 3, opacity: 0.9,
+            lineCap: 'round', lineJoin: 'round', interactive: false,
+          }).addTo(trackLayer);
         }
       }
 
@@ -320,7 +397,10 @@ export const prerender = false;
       setStatus('loading ' + range + '&hellip;');
       let res;
       try {
-        res = await fetch('/api/points?range=' + encodeURIComponent(range) + '&with_fix=1', { credentials: 'same-origin' });
+        // No with_fix: the API returns no-fix rows too so Home-pinned reports
+        // (effective position from Home) can surface; visiblePoints() drops any
+        // that still have no effective lat/lon.
+        res = await fetch('/api/points?range=' + encodeURIComponent(range), { credentials: 'same-origin' });
       } catch {
         setStatus('network error');
         return;
@@ -389,4 +469,22 @@ export const prerender = false;
   }
   :global(.rp .rp-t td:first-child) { opacity: 0.65; white-space: nowrap; }
   :global(.rp .rp-foot) { margin-top: 0.45rem; }
+
+  /* Home-pinned marker (no-fix Find Hub reports pinned to Home) — a house glyph
+     so it reads clearly as an approximate/home location, not a GPS fix. */
+  :global(.home-pin-wrap) { background: transparent; border: 0; }
+  :global(.home-pin) {
+    width: 22px; height: 22px; border-radius: 0.3rem; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; line-height: 1; border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.25);
+  }
+  :global(.rp .rp-pinned) { font-weight: 600; margin-bottom: 0.2rem; opacity: 0.85; }
+
+  /* Custom cluster bubble (iconCreateFunction) — colour from /settings. */
+  :global(.mc-cluster) { background: transparent; }
+  :global(.mc-bubble) {
+    border-radius: 50%; text-align: center; color: #fff; font-weight: 600;
+    font-size: 0.8rem; box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.45);
+  }
 </style>
