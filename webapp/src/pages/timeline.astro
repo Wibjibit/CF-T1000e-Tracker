@@ -20,6 +20,11 @@ export const prerender = false;
       Auto-refresh
     </label>
     <div class="ranges">
+      <select id="device-select" aria-label="Device">
+        <option value="">All devices</option>
+      </select>
+    </div>
+    <div class="ranges">
       <select id="range-select" aria-label="Time range">
         <option value="1h">Last hour</option>
         <option value="6h">Last 6 hours</option>
@@ -58,7 +63,7 @@ export const prerender = false;
     // above; classic scripts run before module scripts so it's there by
     // the time we execute. @ts-nocheck because uPlot's runtime globals
     // aren't typed in this project.
-    import { wireDashboard } from '../scripts/dashboard';
+    import { wireDashboard, fetchDevices, populateDeviceSelect, deviceFromQuery } from '../scripts/dashboard';
 
     const uPlot = window.uPlot;
       const statusEl = document.getElementById('status');
@@ -190,12 +195,14 @@ export const prerender = false;
         if (el) el.textContent = text;
       }
 
-      async function load(range) {
+      async function load(range, deviceId) {
         setStatus('loading ' + range + '…');
         destroyAll();
         let body;
         try {
-          const res = await fetch('/api/points?range=' + encodeURIComponent(range), { credentials: 'same-origin' });
+          let qs = '/api/points?range=' + encodeURIComponent(range);
+          if (deviceId) qs += '&device_id=' + encodeURIComponent(deviceId);
+          const res = await fetch(qs, { credentials: 'same-origin' });
           if (!res.ok) { setStatus('error: HTTP ' + res.status); return; }
           body = await res.json();
         } catch (e) {
@@ -267,12 +274,20 @@ export const prerender = false;
       setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + range + ')' + (body.truncated ? ' — truncated' : ''));
     }
 
-    wireDashboard({
-      selectId: 'range-select',
-      checkboxId: 'auto-refresh',
-      load,
-      resize: true,  // uPlot doesn't auto-resize, so rebuild on viewport change
-    });
+    // Populate the device selector from /api/devices, restoring the ?device=
+    // selection, then wire the dashboard (which fires the first load).
+    const deviceSelect = document.getElementById('device-select');
+    (async () => {
+      const devices = await fetchDevices();
+      if (deviceSelect) populateDeviceSelect(deviceSelect, devices, deviceFromQuery());
+      wireDashboard({
+        selectId: 'range-select',
+        checkboxId: 'auto-refresh',
+        deviceSelectId: 'device-select',
+        load,
+        resize: true,  // uPlot doesn't auto-resize, so rebuild on viewport change
+      });
+    })();
   </script>
 </Layout>
 

@@ -8,7 +8,7 @@ interface LatestRow {
   lat: number | null;
   lon: number | null;
   alt: number | null;
-  fix: number;
+  fix: number | null;
   sats_tracked: number | null;
   sats_in_view: number | null;
   hdop: number | null;
@@ -17,35 +17,50 @@ interface LatestRow {
   battery_mv: number | null;
   temp_c: number | null;
   lux_pct: number | null;
-  motion: 0 | 1;
+  motion: 0 | 1 | null;
   rssi: number | null;
   snr: number | null;
   sf: number | null;
   gateway_id: string | null;
-  dev_eui: string;
-  f_cnt: number;
+  f_cnt: number | null;
 }
 
+// Reads the unified `reports` timeline (not `uplinks`). The LoRa telemetry now
+// lives in source_metadata_json; json_extract pulls it back into the flat shape
+// the card already renders. A JSON boolean `motion` extracts as 1/0.
 const LATEST_COLUMNS = `
   received_at AS ts,
   latitude AS lat, longitude AS lon, altitude_m AS alt,
-  fix_quality AS fix, sats_tracked, sats_in_view, hdop, speed_kmh AS speed,
-  battery_pct, battery_mv, temp_c, lux_pct, motion,
-  rssi, snr, spreading_factor AS sf, gateway_id,
-  dev_eui, f_cnt
+  json_extract(source_metadata_json, '$.fix_quality')      AS fix,
+  json_extract(source_metadata_json, '$.sats_tracked')     AS sats_tracked,
+  json_extract(source_metadata_json, '$.sats_in_view')     AS sats_in_view,
+  json_extract(source_metadata_json, '$.hdop')             AS hdop,
+  json_extract(source_metadata_json, '$.speed_kmh')        AS speed,
+  json_extract(source_metadata_json, '$.battery_pct')      AS battery_pct,
+  json_extract(source_metadata_json, '$.battery_mv')       AS battery_mv,
+  json_extract(source_metadata_json, '$.temp_c')           AS temp_c,
+  json_extract(source_metadata_json, '$.lux_pct')          AS lux_pct,
+  json_extract(source_metadata_json, '$.motion')           AS motion,
+  json_extract(source_metadata_json, '$.rssi')             AS rssi,
+  json_extract(source_metadata_json, '$.snr')              AS snr,
+  json_extract(source_metadata_json, '$.spreading_factor') AS sf,
+  json_extract(source_metadata_json, '$.gateway_id')       AS gateway_id,
+  json_extract(source_metadata_json, '$.f_cnt')            AS f_cnt
 `;
 
-// SSR: pick the most recent uplink with a valid fix, plus the absolute latest
-// (which may be a no-fix frame — useful to show "device is alive but searching").
+// SSR: pick the most recent report with a valid position, plus the absolute
+// latest (which may be a no-fix frame — useful to show "device is alive but
+// searching"). latitude IS NOT NULL reproduces the old fix_quality>0 filter
+// for LoRa (decoder nulls latitude when there's no fix).
 const latestWithFix = await env.DB.prepare(
   `SELECT ${LATEST_COLUMNS}
-     FROM uplinks WHERE fix_quality > 0 AND latitude IS NOT NULL
+     FROM reports WHERE latitude IS NOT NULL
      ORDER BY received_at DESC LIMIT 1`,
 ).first<LatestRow>();
 
 const latestAny = await env.DB.prepare(
   `SELECT ${LATEST_COLUMNS}
-     FROM uplinks ORDER BY received_at DESC LIMIT 1`,
+     FROM reports ORDER BY received_at DESC LIMIT 1`,
 ).first<LatestRow>();
 
 function fixLabel(fix: number | null | undefined): string {

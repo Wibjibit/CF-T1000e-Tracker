@@ -1,6 +1,7 @@
 ---
 // Served via the Worker (not prerendered) so the auth middleware can gate it.
-// The HTML is content-free; all data is fetched client-side from /api/points.
+// The HTML is content-free; all data is fetched client-side from /api/points
+// (which now reads the unified `reports` timeline) and /api/devices.
 import Layout from '../layouts/Layout.astro';
 export const prerender = false;
 ---
@@ -20,6 +21,11 @@ export const prerender = false;
       <input type="checkbox" id="auto-refresh" />
       Auto-refresh
     </label>
+    <div class="ranges">
+      <select id="device-select" aria-label="Device">
+        <option value="">All devices</option>
+      </select>
+    </div>
     <div class="ranges">
       <select id="range-select" aria-label="Time range">
         <option value="1h">Last hour</option>
@@ -47,7 +53,24 @@ export const prerender = false;
     // there by the time we execute. @ts-nocheck because Leaflet's runtime
     // globals aren't typed in this project — the data flow into the page
     // is exercised by the existing CI build + manual smoke tests.
-    import { wireDashboard } from '../scripts/dashboard';
+    import { wireDashboard, fetchDevices, populateDeviceSelect, deviceFromQuery } from '../scripts/dashboard';
+
+    // Pin colour by source_type (docs/architecture.md "UI"). Only 'lora' has
+    // data today; the rest are wired so adding a source later just lights up
+    // its colour + legend row with zero map changes.
+    const SOURCE_COLORS = {
+      lora: '#3aaa3a',                 // green
+      findhub: '#1d68d0',              // blue
+      findmy: '#e8730c',               // orange
+      google_maps_sharing: '#8a44d3',  // purple
+    };
+    const SOURCE_LABELS = {
+      lora: 'LoRaWAN',
+      findhub: 'Find Hub',
+      findmy: 'Apple Find My',
+      google_maps_sharing: 'Maps sharing',
+    };
+    const colorFor = (s) => SOURCE_COLORS[s] || '#888';
 
     const L = window.L;
     const map = L.map('map', { zoomControl: true }).setView([52.5, -1.5], 6);
@@ -56,10 +79,24 @@ export const prerender = false;
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
 
+    // Legend control (bottom-right). Hidden until a load reports which
+    // source_types are actually present in the current view.
+    const legend = L.control({ position: 'bottomright' });
+    legend.onAdd = () => L.DomUtil.create('div', 'pin-legend');
+    legend.addTo(map);
+    function renderLegend(sourceTypes) {
+      const el = document.querySelector('.pin-legend');
+      if (!el) return;
+      if (!sourceTypes.length) { el.innerHTML = ''; el.style.display = 'none'; return; }
+      el.style.display = 'block';
+      el.innerHTML = sourceTypes
+        .map((s) => `<div class="row"><span class="dot" style="background:${colorFor(s)}"></span>${SOURCE_LABELS[s] || s}</div>`)
+        .join('');
+    }
+
     const statusEl = document.getElementById('status');
     let polyline = null;
     let currentMarker = null;
-    let stopMarkers = [];
 
     const setStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
 
@@ -71,9 +108,11 @@ export const prerender = false;
       return Math.floor(diff / 86_400_000) + 'd ago';
     }
 
-    async function load(range) {
+    async function load(range, deviceId) {
         setStatus('loading ' + range + '…');
-        const res = await fetch('/api/points?range=' + encodeURIComponent(range) + '&with_fix=1', { credentials: 'same-origin' });
+        let qs = '/api/points?range=' + encodeURIComponent(range) + '&with_fix=1';
+        if (deviceId) qs += '&device_id=' + encodeURIComponent(deviceId);
+        const res = await fetch(qs, { credentials: 'same-origin' });
         if (!res.ok) {
           setStatus('error: HTTP ' + res.status);
           return;
@@ -83,40 +122,70 @@ export const prerender = false;
 
         if (polyline) { map.removeLayer(polyline); polyline = null; }
         if (currentMarker) { map.removeLayer(currentMarker); currentMarker = null; }
-        stopMarkers.forEach((m) => map.removeLayer(m));
-        stopMarkers = [];
 
         if (points.length === 0) {
+          renderLegend([]);
           setStatus('no fixes in ' + range);
           return;
         }
 
-        // points is already chronological (ASC). Draw a track polyline.
+        // points is already chronological (ASC). Draw a track polyline coloured
+        // by the source if the whole track is one source, else a neutral grey.
+        const present = Array.from(new Set(points.map((p) => p.source_type)));
         const coords = points.map((p) => [p.lat, p.lon]);
-        polyline = L.polyline(coords, { color: '#1d68d0', weight: 3, opacity: 0.8 }).addTo(map);
+        const trackColor = present.length === 1 ? colorFor(present[0]) : '#777';
+        polyline = L.polyline(coords, { color: trackColor, weight: 3, opacity: 0.8 }).addTo(map);
 
-        // Current position = last point.
+        // Current position = last point, coloured by its source.
         const last = points[points.length - 1];
-        currentMarker = L.marker([last.lat, last.lon]).addTo(map);
+        currentMarker = L.circleMarker([last.lat, last.lon], {
+          radius: 7, color: '#fff', weight: 2,
+          fillColor: colorFor(last.source_type), fillOpacity: 1,
+        }).addTo(map);
         currentMarker.bindPopup(
-          '<strong>Current</strong><br>' +
+          '<strong>Current</strong> (' + (SOURCE_LABELS[last.source_type] || last.source_type) + ')<br>' +
             fmtAgo(last.ts) + '<br>' +
             'Battery ' + (last.battery_pct ?? '?') + '% (' + (last.battery_mv ?? '?') + ' mV)<br>' +
             'Temp ' + (last.temp_c ?? '?') + ' &deg;C, Lux ' + (last.lux_pct ?? '?') + '%',
         );
 
+      renderLegend(present);
       map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
       setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + range + ')' + (body.truncated ? ' &mdash; truncated' : ''));
     }
 
-    wireDashboard({
-      selectId: 'range-select',
-      checkboxId: 'auto-refresh',
-      load,
-    });
+    // Populate the device selector from /api/devices, restoring the
+    // ?device= selection, then wire the dashboard (which fires the first load).
+    const deviceSelect = document.getElementById('device-select');
+    (async () => {
+      const devices = await fetchDevices();
+      if (deviceSelect) populateDeviceSelect(deviceSelect, devices, deviceFromQuery());
+      wireDashboard({
+        selectId: 'range-select',
+        checkboxId: 'auto-refresh',
+        deviceSelectId: 'device-select',
+        load,
+      });
+    })();
   </script>
 </Layout>
 
 <style>
   #map { flex: 1 1 auto; min-height: 0; }
+
+  /* Source-colour legend overlay (Leaflet control). */
+  :global(.pin-legend) {
+    background: rgba(255, 255, 255, 0.9);
+    color: #222;
+    padding: 0.4rem 0.6rem;
+    border-radius: 0.4rem;
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
+    font-size: 0.8rem;
+    line-height: 1.5;
+  }
+  :global(.pin-legend .row) { display: flex; align-items: center; gap: 0.4rem; }
+  :global(.pin-legend .dot) {
+    width: 0.7rem; height: 0.7rem; border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.3); flex: 0 0 auto;
+  }
 </style>

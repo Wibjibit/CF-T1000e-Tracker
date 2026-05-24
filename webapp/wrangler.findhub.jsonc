@@ -1,0 +1,53 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  // ────────────────────────────────────────────────────────────────────
+  // Find Hub poller — companion Worker (master-plan Phase 3.2/3.3).
+  //
+  // Separate from the Astro site (wrangler.jsonc) because the @astrojs/cloudflare
+  // adapter deploys `no_bundle: true` and can't host a Durable Object + its
+  // bundled deps. This worker owns the FindHubPoller DO and the */10 cron that
+  // keeps it ticking, and binds the SAME D1 database as the site.
+  //
+  // Deploy:  npm run build is NOT needed here (this worker is bundled by wrangler
+  //          from src/worker-findhub.ts directly):
+  //            wrangler deploy --config wrangler.findhub.jsonc
+  //          wrangler secret put BLOB_ENC_KEY --config wrangler.findhub.jsonc
+  // Verify:  wrangler deploy --dry-run --outdir .wrangler/findhub-dryrun \
+  //            --config wrangler.findhub.jsonc
+  // ────────────────────────────────────────────────────────────────────
+
+  "name": "findhub-poller",
+  "account_id": "a3c6a5b41c0312ead688ef0c16313b45",
+  "main": "src/worker-findhub.ts",
+  "compatibility_date": "2026-05-16",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // No public URL — the worker is reached only by its cron trigger and by the
+  // DO's internal self-scheduling. Keeps the poll path off the public internet.
+  "workers_dev": false,
+  "preview_urls": false,
+
+  "observability": {
+    "enabled": true
+  },
+
+  "triggers": {
+    "crons": ["*/10 * * * *"]
+  },
+
+  "durable_objects": {
+    "bindings": [{ "name": "FINDHUB_POLLER", "class_name": "FindHubPoller" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FindHubPoller"] }],
+
+  // Same database as the site (wrangler.jsonc). migrations_dir is intentionally
+  // omitted: schema migrations are owned by the site config, not this worker.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tracker",
+      "database_id": "1b4cbacf-0841-48fa-a672-84ff04df5a33"
+    }
+  ]
+}

@@ -1,0 +1,361 @@
+---
+import { env } from 'cloudflare:workers';
+import {
+  listAccounts,
+  listDevicesWithSources,
+  setSourceEnabled,
+  deleteSource,
+  renameDevice,
+  addDevice,
+  addSource,
+  deleteAccount,
+  SOURCE_TYPES,
+  type SourceType,
+} from '../lib/sources';
+import { formatAgo } from '../lib/format';
+import Layout from '../layouts/Layout.astro';
+
+export const prerender = false;
+
+let saved = false;
+let saveError: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  try {
+    const form = await Astro.request.formData();
+    const action = (form.get('action') ?? '').toString();
+    const now = Date.now();
+
+    switch (action) {
+      case 'toggle_source': {
+        const sourceId = Number(form.get('source_id'));
+        const enabled = (form.get('enabled') ?? '').toString() === '1';
+        await setSourceEnabled(env.DB, sourceId, enabled);
+        saved = true;
+        break;
+      }
+      case 'delete_source': {
+        const sourceId = Number(form.get('source_id'));
+        await deleteSource(env.DB, sourceId);
+        saved = true;
+        break;
+      }
+      case 'rename_device': {
+        const deviceId = (form.get('device_id') ?? '').toString();
+        const name = (form.get('display_name') ?? '').toString();
+        await renameDevice(env.DB, deviceId, name);
+        saved = true;
+        break;
+      }
+      case 'add_device': {
+        const deviceId = (form.get('device_id') ?? '').toString();
+        const displayName = (form.get('display_name') ?? '').toString();
+        await addDevice(env.DB, deviceId, displayName, now);
+        saved = true;
+        break;
+      }
+      case 'add_source': {
+        const deviceId = (form.get('device_id') ?? '').toString();
+        const sourceType = (form.get('source_type') ?? '').toString();
+        const sourceRef = (form.get('source_ref') ?? '').toString();
+        const accountRaw = (form.get('account_id') ?? '').toString();
+        const accountId = accountRaw ? Number(accountRaw) : null;
+        await addSource(env.DB, { deviceId, sourceType, sourceRef, accountId, now });
+        saved = true;
+        break;
+      }
+      case 'delete_account': {
+        const accountId = Number(form.get('account_id'));
+        await deleteAccount(env.DB, accountId);
+        saved = true;
+        break;
+      }
+      default:
+        saveError = `Unknown action: ${action || '(none)'}`;
+    }
+  } catch (e) {
+    saveError = e instanceof Error ? e.message : String(e);
+  }
+}
+
+const accounts = await listAccounts(env.DB);
+const devices = await listDevicesWithSources(env.DB);
+
+function accountHealth(row: {
+  last_error: string | null;
+  last_refreshed_at: number | null;
+}): { text: string; cls: string } {
+  if (row.last_error) return { text: 'auth error', cls: 'bad' };
+  if (row.last_refreshed_at) return { text: 'ok', cls: 'ok' };
+  return { text: 'never used', cls: 'neutral' };
+}
+
+const SOURCE_LABELS: Record<SourceType, string> = {
+  lora: 'LoRaWAN',
+  findhub: 'Find Hub',
+  findmy: 'Apple Find My',
+  google_maps_sharing: 'Maps sharing',
+};
+---
+<Layout title="Devices & Sources">
+  <section class="page">
+    <h1 class="page-title">Devices &amp; Sources</h1>
+
+    <style>
+      .page { max-width: 56rem; margin: 2rem auto; padding: 0 1rem; width: 100%; }
+      .page-title { margin: 0 0 1.25rem; font-size: 1.4rem; }
+
+      section.card {
+        border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+        border-radius: 0.5rem; padding: 1rem 1.25rem; margin-bottom: 1.5rem;
+      }
+      section.card h2 { font-size: 0.95rem; margin: 0 0 0.7rem; font-weight: 600; }
+
+      form .row { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.9rem; }
+      form label { font-size: 0.85rem; opacity: 0.75; }
+      form input[type="text"], form input[type="url"], form select {
+        font: inherit; padding: 0.45em 0.6em; border-radius: 0.35em;
+        border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+        background: transparent; color: inherit; min-width: 0;
+      }
+      form select option { color: black; background: white; }
+      form .check { display: flex; align-items: center; gap: 0.5em; }
+      form button {
+        font: inherit; padding: 0.5em 1em; border-radius: 0.35em; border: 0; cursor: pointer;
+        background: color-mix(in srgb, currentColor 18%, transparent); color: inherit;
+      }
+      form button:hover { background: color-mix(in srgb, currentColor 28%, transparent); }
+
+      .toast { padding: 0.5em 0.8em; border-radius: 0.35em; margin-bottom: 1rem; font-size: 0.9rem; }
+      .toast.ok  { background: color-mix(in srgb, green  20%, transparent); }
+      .toast.bad { background: color-mix(in srgb, #c33   18%, transparent); color: #c33; }
+
+      table { width: 100%; border-collapse: collapse; font-size: 0.88rem; font-variant-numeric: tabular-nums; }
+      th, td { text-align: left; padding: 0.35em 0.55em; border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent); vertical-align: top; }
+      th { font-weight: 500; opacity: 0.65; }
+      td.err { color: #c33; max-width: 28ch; word-break: break-word; }
+
+      .badge { display: inline-block; padding: 0.05em 0.5em; border-radius: 0.3em; font-size: 0.78em; font-weight: 600; }
+      .badge.ok      { background: color-mix(in srgb, green  35%, transparent); }
+      .badge.warn    { background: color-mix(in srgb, orange 35%, transparent); }
+      .badge.bad     { background: color-mix(in srgb, #c33   35%, transparent); color: #fff; }
+      .badge.neutral { background: color-mix(in srgb, currentColor 18%, transparent); }
+
+      .empty { padding: 1.5rem; text-align: center; opacity: 0.55; font-size: 0.95rem; }
+
+      /* Source-type badges — colours match the map pin legend (map.astro). */
+      .src-badge { display: inline-block; padding: 0.05em 0.5em; border-radius: 0.3em; font-size: 0.78em; font-weight: 600; color: #fff; }
+      .src-badge.lora                { background: #3aaa3a; }   /* green */
+      .src-badge.findhub             { background: #1d68d0; }   /* blue (accent) */
+      .src-badge.findmy              { background: #e8730c; }   /* orange */
+      .src-badge.google_maps_sharing { background: #8a44d3; }   /* purple */
+
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .dim { opacity: 0.6; }
+
+      .device-block { margin-bottom: 1.5rem; }
+      .device-block:last-child { margin-bottom: 0; }
+      .device-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+      .device-head .name { font-weight: 600; font-size: 0.95rem; }
+      .device-head .rename { display: flex; align-items: center; gap: 0.4rem; margin: 0; }
+      .device-head .rename input[type="text"] { padding: 0.3em 0.5em; font-size: 0.85rem; }
+      .device-head .rename button { padding: 0.35em 0.7em; font-size: 0.85rem; }
+      .device-id { font-size: 0.8rem; }
+
+      .inline-form { display: inline; margin: 0; }
+      .inline-form button { padding: 0.3em 0.7em; font-size: 0.82rem; }
+      td .ref { word-break: break-all; max-width: 22ch; display: inline-block; }
+    </style>
+
+    {saved && <div class="toast ok">Saved.</div>}
+    {saveError && <div class="toast bad">Could not save: {saveError}</div>}
+
+    <!-- ── Accounts ─────────────────────────────────────────────── -->
+    <section class="card">
+      <h2>Accounts ({accounts.length})</h2>
+      <p style="margin-top: 0; opacity: 0.7; font-size: 0.92rem;">
+        Accounts hold encrypted provider credentials and are created by the
+        <code>scripts/import-google-account.mjs</code> bootstrap importer &mdash;
+        browser OAuth can&rsquo;t run inside a Worker, so this page manages and
+        inspects accounts but doesn&rsquo;t create them. Credential material is
+        never shown here.
+      </p>
+      {accounts.length === 0 ? (
+        <div class="empty">No accounts imported yet.</div>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Provider</th>
+              <th>Label</th>
+              <th>Key ver</th>
+              <th>Auth health</th>
+              <th>Error</th>
+              <th>Last OK</th>
+              <th>Last attempt</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {accounts.map((a) => {
+              const health = accountHealth(a);
+              return (
+                <tr>
+                  <td>{a.provider}</td>
+                  <td>{a.account_label}</td>
+                  <td>{a.key_version}</td>
+                  <td><span class={`badge ${health.cls}`}>{health.text}</span></td>
+                  <td class="err">{a.last_error ?? ''}</td>
+                  <td>{a.last_refreshed_at ? formatAgo(a.last_refreshed_at) : '—'}</td>
+                  <td>{a.last_attempt_at ? formatAgo(a.last_attempt_at) : '—'}</td>
+                  <td>
+                    <form method="POST" class="inline-form">
+                      <input type="hidden" name="action" value="delete_account" />
+                      <input type="hidden" name="account_id" value={a.account_id} />
+                      <button type="submit">Delete</button>
+                    </form>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </section>
+
+    <!-- ── Devices & sources ────────────────────────────────────── -->
+    <section class="card">
+      <h2>Devices &amp; sources ({devices.length})</h2>
+      {devices.length === 0 ? (
+        <div class="empty">No devices yet. Add one below.</div>
+      ) : (
+        devices.map((d) => (
+          <div class="device-block">
+            <div class="device-head">
+              <span class="name">{d.display_name}</span>
+              <form method="POST" class="rename">
+                <input type="hidden" name="action" value="rename_device" />
+                <input type="hidden" name="device_id" value={d.device_id} />
+                <input type="text" name="display_name" value={d.display_name} aria-label="Rename device" />
+                <button type="submit">Save</button>
+              </form>
+            </div>
+            <div class="device-id mono dim">{d.device_id}</div>
+            {d.sources.length === 0 ? (
+              <div class="empty">No sources attached.</div>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Ref</th>
+                    <th>Account</th>
+                    <th>Enabled</th>
+                    <th>Last report</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.sources.map((s) => (
+                    <tr>
+                      <td><span class={`src-badge ${s.source_type}`}>{SOURCE_LABELS[s.source_type]}</span></td>
+                      <td><span class="ref mono">{s.source_ref}</span></td>
+                      <td>{s.account_label ?? '—'}</td>
+                      <td>
+                        <form method="POST" class="inline-form">
+                          <input type="hidden" name="action" value="toggle_source" />
+                          <input type="hidden" name="source_id" value={s.source_id} />
+                          <input type="hidden" name="enabled" value={s.enabled ? '0' : '1'} />
+                          <button type="submit">
+                            {s.enabled ? 'Enabled' : 'Disabled'}
+                          </button>
+                        </form>
+                      </td>
+                      <td>{s.last_report_at ? formatAgo(s.last_report_at) : 'never'}</td>
+                      <td>
+                        <form method="POST" class="inline-form">
+                          <input type="hidden" name="action" value="delete_source" />
+                          <input type="hidden" name="source_id" value={s.source_id} />
+                          <button type="submit">Delete</button>
+                        </form>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        ))
+      )}
+    </section>
+
+    <!-- ── Add device ───────────────────────────────────────────── -->
+    <section class="card">
+      <h2>Add device</h2>
+      <p style="margin-top: 0; opacity: 0.7; font-size: 0.92rem;">
+        Create a new physical device. The device id is an opaque slug (e.g.
+        <code>t1000e-&lt;deveui&gt;</code>) &mdash; type your own. Re-adding an
+        existing id is a no-op.
+      </p>
+      <form method="POST">
+        <input type="hidden" name="action" value="add_device" />
+        <div class="row">
+          <label for="add_device_id">Device id</label>
+          <input type="text" id="add_device_id" name="device_id" placeholder="t1000e-…" required />
+        </div>
+        <div class="row">
+          <label for="add_device_name">Display name</label>
+          <input type="text" id="add_device_name" name="display_name" placeholder="My tracker" required />
+        </div>
+        <button type="submit">Add device</button>
+      </form>
+    </section>
+
+    <!-- ── Add source ───────────────────────────────────────────── -->
+    <section class="card">
+      <h2>Add source</h2>
+      <p style="margin-top: 0; opacity: 0.7; font-size: 0.92rem;">
+        Attach a tracking mechanism to an existing device. Credential-backed
+        sources (Find Hub, Apple Find My, Maps sharing) require an account;
+        LoRaWAN does not.
+      </p>
+      {devices.length === 0 ? (
+        <div class="empty">Add a device first.</div>
+      ) : (
+        <form method="POST">
+          <input type="hidden" name="action" value="add_source" />
+          <div class="row">
+            <label for="add_source_device">Device</label>
+            <select id="add_source_device" name="device_id" required>
+              {devices.map((d) => (
+                <option value={d.device_id}>{d.display_name} ({d.device_id})</option>
+              ))}
+            </select>
+          </div>
+          <div class="row">
+            <label for="add_source_type">Source type</label>
+            <select id="add_source_type" name="source_type" required>
+              {SOURCE_TYPES.map((t) => (
+                <option value={t}>{SOURCE_LABELS[t]}</option>
+              ))}
+            </select>
+          </div>
+          <div class="row">
+            <label for="add_source_ref">Source ref</label>
+            <input type="text" id="add_source_ref" name="source_ref" placeholder="DevEUI / canonic_id / email / …" required />
+          </div>
+          <div class="row">
+            <label for="add_source_account">Account (required for non-LoRa sources)</label>
+            <select id="add_source_account" name="account_id">
+              <option value="">— none —</option>
+              {accounts.map((a) => (
+                <option value={a.account_id}>{a.account_label} ({a.provider})</option>
+              ))}
+            </select>
+          </div>
+          <button type="submit">Add source</button>
+        </form>
+      )}
+    </section>
+  </section>
+</Layout>

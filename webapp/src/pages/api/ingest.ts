@@ -2,6 +2,11 @@ import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { base64ToBytes, decodeUplink } from '../../lib/decoder';
 import {
+  ensureLoraSource,
+  loraSourceMetadata,
+  loraReportInsert,
+} from '../../lib/reports';
+import {
   readForwarderConfig,
   appendForwardLog,
   readTtnApiConfig,
@@ -251,8 +256,20 @@ export const POST: APIRoute = async ({ request, locals }) => {
     body.uplink_message?.received_at ?? body.received_at ?? new Date().toISOString();
   const receivedAtMs = Date.parse(receivedAtIso);
 
-  // 7. Idempotent insert. Duplicate (dev_eui, f_cnt) -> no-op.
-  const insert = await env.DB.prepare(
+  const rawJson = JSON.stringify(body);
+
+  // 7. Resolve (get-or-create) the device + LoRa source this DevEUI maps to,
+  // so the unified `reports` row can reference it. Idempotent — after the
+  // first uplink for a DevEUI this is a single SELECT. Done before the
+  // dual-write because the report FK-references device_sources(source_id).
+  const { deviceId, sourceId } = await ensureLoraSource(env.DB, devEui, Date.now());
+
+  // 8. Dual-write: the raw `uplinks` inbox AND the unified `reports` timeline,
+  // in ONE D1 batch (transaction). Either both land or neither does, so a
+  // decoder/report bug can never leave `uplinks` populated but `reports`
+  // short. Both are INSERT OR IGNORE, so a replayed (dev_eui, f_cnt) is a
+  // no-op on both tables (reports dedups on UNIQUE(source_id, received_at)).
+  const uplinkStmt = env.DB.prepare(
     `INSERT OR IGNORE INTO uplinks (
        dev_eui, f_cnt, received_at,
        latitude, longitude, altitude_m, hdop,
@@ -262,43 +279,60 @@ export const POST: APIRoute = async ({ request, locals }) => {
        rssi, snr, gateway_id, spreading_factor,
        raw_json
      ) VALUES (?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?,  ?, ?, ?, ?, ?,  ?, ?, ?, ?,  ?)`,
-  )
-    .bind(
-      devEui,
+  ).bind(
+    devEui,
+    fCnt,
+    receivedAtMs,
+    d.latitude,
+    d.longitude,
+    d.altitude_m,
+    d.hdop,
+    d.sats_tracked,
+    d.sats_in_view,
+    d.fix_quality,
+    d.speed_kmh,
+    d.uart_bytes_rx,
+    d.uart_lines_parsed,
+    d.battery_pct,
+    d.battery_mv,
+    d.temp_c,
+    d.lux_pct,
+    d.motion ? 1 : 0,
+    best?.rssi ?? null,
+    best?.snr ?? null,
+    best?.gateway_ids?.gateway_id ?? null,
+    spreadingFactor,
+    rawJson,
+  );
+
+  const reportStmt = loraReportInsert(env.DB, {
+    deviceId,
+    sourceId,
+    receivedAt: receivedAtMs,
+    decoded: d,
+    metadata: loraSourceMetadata(
+      d,
+      {
+        rssi: best?.rssi ?? null,
+        snr: best?.snr ?? null,
+        gateway_id: best?.gateway_ids?.gateway_id ?? null,
+        spreading_factor: spreadingFactor,
+      },
       fCnt,
-      receivedAtMs,
-      d.latitude,
-      d.longitude,
-      d.altitude_m,
-      d.hdop,
-      d.sats_tracked,
-      d.sats_in_view,
-      d.fix_quality,
-      d.speed_kmh,
-      d.uart_bytes_rx,
-      d.uart_lines_parsed,
-      d.battery_pct,
-      d.battery_mv,
-      d.temp_c,
-      d.lux_pct,
-      d.motion ? 1 : 0,
-      best?.rssi ?? null,
-      best?.snr ?? null,
-      best?.gateway_ids?.gateway_id ?? null,
-      spreadingFactor,
-      JSON.stringify(body),
-    )
-    .run();
+    ),
+    rawPayload: rawJson,
+  });
 
-  const inserted = insert.meta.changes > 0;
+  const batchResult = await env.DB.batch([uplinkStmt, reportStmt]);
+  const inserted = batchResult[0]!.meta.changes > 0;
 
-  // 8. Optional fan-out to TTN Mapper (or any configured forwarder). Only on
+  // 9. Optional fan-out to TTN Mapper (or any configured forwarder). Only on
   // first insert — replays would double-feed downstream. Detached via
   // waitUntil so a slow TTN Mapper can never time us out from TTN's side.
   if (inserted) {
     const forwarder = await readForwarderConfig(env.DB);
     if (forwarder.enabled && forwarder.url) {
-      const forwardBody = JSON.stringify(body);
+      const forwardBody = rawJson;
       const ttsDomain = body.uplink_message?.network_ids?.cluster_address ?? '';
       locals.cfContext.waitUntil(
         forwardToTtnMapper(
@@ -312,7 +346,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
     }
 
-    // 9. Gateway sightings + lazy lookup. Every gateway_id in rx_metadata
+    // 10. Gateway sightings + lazy lookup. Every gateway_id in rx_metadata
     // gets a row (status='never_refreshed' if new). For new or stale rows
     // (>7d since last refresh), queue a TTN gateway-API fetch via waitUntil.
     // Skips entirely if no API key is configured — sightings still upsert.
