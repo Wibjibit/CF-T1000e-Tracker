@@ -55,6 +55,19 @@ const appearance = await readMapAppearance(env.DB);
     </div>
   </div>
 
+  {/* Custom date range (overrides the preset above) — mirrors /timeline. The
+      map's source/device show-hide lives in the top-right layer panel. */}
+  <div class="filters-bar">
+    <div class="filters">
+      <fieldset class="range-filter">
+        <legend>Custom range (overrides the preset)</legend>
+        <label>Start <input type="datetime-local" id="custom-start" /></label>
+        <label>End <input type="datetime-local" id="custom-end" /></label>
+        <button type="button" id="custom-clear" class="ghost">Clear</button>
+      </fieldset>
+    </div>
+  </div>
+
   <div id="map"></div>
 
   <script
@@ -393,14 +406,29 @@ const appearance = await readMapAppearance(env.DB);
       namesLoaded = true;
     }
 
+    // datetime-local (local, naive) -> epoch ms, or null if blank.
+    const customStartEl = document.getElementById('custom-start');
+    const customEndEl = document.getElementById('custom-end');
+    function localToMs(v) { if (!v) return null; const t = new Date(v).getTime(); return Number.isFinite(t) ? t : null; }
+    // A non-blank custom range overrides the preset (mirrors /timeline). No
+    // with_fix: the API returns no-fix rows too so Home-pinned reports (effective
+    // position from Home) can surface; visiblePoints() drops any still without an
+    // effective lat/lon.
+    function buildPointsQuery(range) {
+      const startMs = localToMs(customStartEl.value);
+      const endMs = localToMs(customEndEl.value);
+      if (startMs != null || endMs != null) {
+        return '/api/points?since=' + (startMs != null ? startMs : 0) + '&until=' + (endMs != null ? endMs : Date.now());
+      }
+      return '/api/points?range=' + encodeURIComponent(range);
+    }
+
     async function load(range) {
-      setStatus('loading ' + range + '&hellip;');
+      const rangeLabel = (customStartEl.value || customEndEl.value) ? 'custom range' : range;
+      setStatus('loading ' + rangeLabel + '&hellip;');
       let res;
       try {
-        // No with_fix: the API returns no-fix rows too so Home-pinned reports
-        // (effective position from Home) can surface; visiblePoints() drops any
-        // that still have no effective lat/lon.
-        res = await fetch('/api/points?range=' + encodeURIComponent(range), { credentials: 'same-origin' });
+        res = await fetch(buildPointsQuery(range), { credentials: 'same-origin' });
       } catch {
         setStatus('network error');
         return;
@@ -415,12 +443,37 @@ const appearance = await readMapAppearance(env.DB);
       if (!fitted) fitToVisible();
     }
 
-    wireDashboard({ selectId: 'range-select', checkboxId: 'auto-refresh', load });
+    const controller = wireDashboard({ selectId: 'range-select', checkboxId: 'auto-refresh', load });
+    // The custom date range applies to the map too — re-fetch when it changes.
+    for (const el of [customStartEl, customEndEl]) {
+      if (el) el.addEventListener('change', () => controller.refresh());
+    }
+    const customClear = document.getElementById('custom-clear');
+    if (customClear) customClear.addEventListener('click', () => {
+      customStartEl.value = ''; customEndEl.value = '';
+      controller.refresh();
+    });
   </script>
 </Layout>
 
 <style>
   #map { flex: 1 1 auto; min-height: 0; }
+
+  /* ── shared filter strip (custom date range) — matches /timeline ── */
+  .filters-bar {
+    flex: 0 0 auto;
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  }
+  .filters { display: flex; flex-wrap: wrap; gap: 1rem; max-width: 70rem; margin: 0 auto; width: 100%; }
+  .filters fieldset {
+    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+    border-radius: 0.45rem; padding: 0.5rem 0.8rem 0.7rem;
+  }
+  .filters legend { font-size: 0.72rem; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.04em; }
+  .range-filter label { font-size: 0.82rem; display: inline-flex; flex-direction: column; gap: 0.15rem; margin-right: 0.6rem; }
+  .range-filter input { font: inherit; padding: 0.25em 0.4em; border-radius: 0.3em; background: transparent; color: inherit; border: 1px solid color-mix(in srgb, currentColor 28%, transparent); }
+  button.ghost { font: inherit; font-size: 0.8rem; padding: 0.3em 0.7em; cursor: pointer; background: transparent; color: inherit; border: 1px solid color-mix(in srgb, currentColor 28%, transparent); border-radius: 0.3em; align-self: end; }
 
   /* ── Layer / export panel (Leaflet control, top-right) ───────────────── */
   :global(.map-panel) {

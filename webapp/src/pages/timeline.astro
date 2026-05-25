@@ -59,6 +59,24 @@ const appearance = await readMapAppearance(env.DB);
     <button id="tab-btn-table" class="tab" role="tab" aria-selected="false">Table</button>
   </div>
 
+  {/* Shared filter strip — applies to BOTH tabs (Charts + Table). The custom
+      range overrides the preset in the page-bar; the source filter scopes
+      which networks contribute. Both feed buildPointsQuery() below. */}
+  <div class="filters-bar">
+    <div class="filters">
+      <fieldset class="src-filter">
+        <legend>Networks / sources</legend>
+        <div id="source-filter" class="src-checks"><!-- checkboxes injected --></div>
+      </fieldset>
+      <fieldset class="range-filter">
+        <legend>Custom range (overrides the preset)</legend>
+        <label>Start <input type="datetime-local" id="custom-start" /></label>
+        <label>End <input type="datetime-local" id="custom-end" /></label>
+        <button type="button" id="custom-clear" class="ghost">Clear</button>
+      </fieldset>
+    </div>
+  </div>
+
   <section id="tab-charts" class="tab-panel">
     <section class="charts">
       <div class="chart-card"><h2>Battery <span class="latest" data-latest="battery_pct">&mdash;</span></h2><div class="chart" id="chart-battery"></div></div>
@@ -79,18 +97,6 @@ const appearance = await readMapAppearance(env.DB);
 
   <section id="tab-table" class="tab-panel" hidden>
     <div class="table-wrap">
-      <div class="filters">
-        <fieldset class="src-filter">
-          <legend>Networks / sources</legend>
-          <div id="source-filter" class="src-checks"><!-- checkboxes injected --></div>
-        </fieldset>
-        <fieldset class="range-filter">
-          <legend>Custom range (overrides the preset)</legend>
-          <label>Start <input type="datetime-local" id="custom-start" /></label>
-          <label>End <input type="datetime-local" id="custom-end" /></label>
-          <button type="button" id="custom-clear" class="ghost">Clear</button>
-        </fieldset>
-      </div>
       <div class="table-card">
         <table id="data-table">
           <thead>
@@ -226,18 +232,17 @@ const appearance = await readMapAppearance(env.DB);
     function setLatest(key, text) { const el = document.querySelector(`[data-latest="${key}"]`); if (el) el.textContent = text; }
 
     async function loadCharts(range, deviceId) {
-      setStatus('loading ' + range + '…');
+      const rangeLabel = (customStartEl.value || customEndEl.value) ? 'custom range' : range;
+      setStatus('loading ' + rangeLabel + '…');
       destroyAll();
       let body;
       try {
-        let qs = '/api/points?range=' + encodeURIComponent(range);
-        if (deviceId) qs += '&device_id=' + encodeURIComponent(deviceId);
-        const res = await fetch(qs, { credentials: 'same-origin' });
+        const res = await fetch(buildPointsQuery(range, deviceId), { credentials: 'same-origin' });
         if (!res.ok) { setStatus('error: HTTP ' + res.status); return; }
         body = await res.json();
       } catch (e) { setStatus('error: ' + e.message); return; }
       const points = body.points || [];
-      if (points.length === 0) { setStatus('no data in ' + range); return; }
+      if (points.length === 0) { setStatus('no data in ' + rangeLabel); return; }
       const xs = points.map((p) => p.ts / 1000);
       const batteryPct = points.map((p) => p.battery_pct);
       const batteryMv  = points.map((p) => p.battery_mv);
@@ -282,7 +287,7 @@ const appearance = await readMapAppearance(env.DB);
       setLatest('speed',       last.speed == null ? '—' : last.speed + ' km/h');
       const motionCount = motion.reduce((a, b) => a + b, 0);
       setLatest('motion_count', motionCount + ' of ' + points.length);
-      setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + range + ')' + (body.truncated ? ' — truncated' : ''));
+      setStatus(points.length + ' point' + (points.length === 1 ? '' : 's') + ' (' + rangeLabel + ')' + (body.truncated ? ' — truncated' : ''));
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -301,6 +306,24 @@ const appearance = await readMapAppearance(env.DB);
     }
     // datetime-local value (local, naive) -> epoch ms, or null if blank.
     function localToMs(v) { if (!v) return null; const t = new Date(v).getTime(); return Number.isFinite(t) ? t : null; }
+
+    // Shared /api/points query for BOTH tabs: a non-blank custom range overrides
+    // the preset; the source filter scopes which networks contribute. loadCharts
+    // and loadTable both call this so the two views never diverge.
+    function buildPointsQuery(range, deviceId) {
+      const startMs = localToMs(customStartEl.value);
+      const endMs = localToMs(customEndEl.value);
+      let qs = '/api/points?';
+      if (startMs != null || endMs != null) {
+        qs += 'since=' + (startMs != null ? startMs : 0) + '&until=' + (endMs != null ? endMs : Date.now());
+      } else {
+        qs += 'range=' + encodeURIComponent(range);
+      }
+      if (deviceId) qs += '&device_id=' + encodeURIComponent(deviceId);
+      const srcs = selectedSources();
+      if (srcs.length) qs += '&source_type=' + encodeURIComponent(srcs.join(','));
+      return qs;
+    }
 
     function buildSourceFilter(devices) {
       // Show only the source types actually present across devices.
@@ -330,18 +353,7 @@ const appearance = await readMapAppearance(env.DB);
       setStatus('loading…');
       let body;
       try {
-        const startMs = localToMs(customStartEl.value);
-        const endMs = localToMs(customEndEl.value);
-        let qs = '/api/points?';
-        if (startMs != null || endMs != null) {
-          qs += 'since=' + (startMs != null ? startMs : 0) + '&until=' + (endMs != null ? endMs : Date.now());
-        } else {
-          qs += 'range=' + encodeURIComponent(range);
-        }
-        if (deviceId) qs += '&device_id=' + encodeURIComponent(deviceId);
-        const srcs = selectedSources();
-        if (srcs.length) qs += '&source_type=' + encodeURIComponent(srcs.join(','));
-        const res = await fetch(qs, { credentials: 'same-origin' });
+        const res = await fetch(buildPointsQuery(range, deviceId), { credentials: 'same-origin' });
         if (!res.ok) { setStatus('error: HTTP ' + res.status); return; }
         body = await res.json();
       } catch (e) { setStatus('error: ' + e.message); return; }
@@ -593,9 +605,15 @@ const appearance = await readMapAppearance(env.DB);
   .chart-card .chart { height: 160px; }
   .motion-card .chart { height: 70px; }
 
+  /* ── shared filter strip (below the tabs, applies to both tabs) ── */
+  .filters-bar {
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  }
+
   /* ── table tab ── */
   .table-wrap { max-width: 70rem; margin: 0 auto; padding: 1rem; width: 100%; }
-  .filters { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; }
+  .filters { display: flex; flex-wrap: wrap; gap: 1rem; max-width: 70rem; margin: 0 auto; width: 100%; }
   .filters fieldset {
     border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
     border-radius: 0.45rem; padding: 0.5rem 0.8rem 0.7rem;
